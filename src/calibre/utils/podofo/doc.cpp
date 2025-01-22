@@ -329,133 +329,103 @@ PDFDoc_copy_page(PDFDoc *self, PyObject *args) {
 
 // append() {{{
 
-static PyObject *
-PDFDoc_append(PDFDoc *self, PyObject *args) {
-    class AppendPagesData {
-        public:
-            const PdfPage *src_page;
-            PdfPage *dest_page;
-            PdfReference dest_page_parent;
-            AppendPagesData(const PdfPage &src, PdfPage &dest) {
-                src_page = &src;
-                dest_page = &dest;
-                dest_page_parent = dest.GetDictionary().GetKeyAs<PdfReference>("Parent");
-            }
-    };
-    class MapReferences : public std::unordered_map<PdfReference, PdfObject*> {
-        public:
-            void apply(PdfObject &parent) {
-                switch(parent.GetDataType()) {
-                    case PdfDataType::Dictionary:
-                        for (auto& pair : parent.GetDictionary()) {
-                            apply(pair.second );
-                        }
-                        break;
-                    case PdfDataType::Array:
-                        for (auto& child : parent.GetArray())  apply(child);
-                        break;
-                    case PdfDataType::Reference:
-                        if (auto search = find(parent.GetReference()); search != end()) {
-                            parent.SetReference(search->second->GetIndirectReference());
-                        }
-                        break;
-                    default:
-                        break;
-                }
-            }
-    };
-
-    static const PdfName inheritableAttributes[] = {
-        PdfName("Resources"),
-        PdfName("MediaBox"),
-        PdfName("CropBox"),
-        PdfName("Rotate"),
-        PdfName::KeyNull
-    };
-    PdfMemDocument *dest = self->doc;
-    std::vector<const PdfMemDocument*> docs(PyTuple_GET_SIZE(args));
-    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(args); i++) {
-        PyObject *doc = PyTuple_GET_ITEM(args, i);
-        int typ = PyObject_IsInstance(doc, (PyObject*)&PDFDocType);
-        if (typ == -1) return NULL;
-        if (typ == 0) { PyErr_SetString(PyExc_TypeError, "You must pass a PDFDoc instance to this method"); return NULL; }
-        docs[i] = ((PDFDoc*)doc)->doc;
-    }
-
-    PyThreadState *_save; _save = PyEval_SaveThread();
-    try {
-        unsigned total_pages_to_append = 0;
-        for (auto src : docs)  total_pages_to_append += src->GetPages().GetCount();
-        unsigned base_page_index = dest->GetPages().GetCount();
-        dest->GetPages().CreatePagesAt(base_page_index, total_pages_to_append, Rect());
-        for (auto src : docs) {
-            MapReferences ref_map;
-            std::vector<AppendPagesData> pages;
-            // append pages first
-            for (unsigned i = 0; i < src->GetPages().GetCount(); i++) {
-                const auto& src_page = src->GetPages().GetPageAt(i);
-                auto& dest_page = dest->GetPages().GetPageAt(base_page_index++);
-                pages.emplace_back(src_page, dest_page);
-                dest_page.GetObject() = src_page.GetObject();
-                dest_page.GetDictionary().RemoveKey("Resource");
-                dest_page.GetDictionary().RemoveKey("Parent");
-                ref_map[src_page.GetObject().GetIndirectReference()] = &dest_page.GetObject();
-            }
-            // append all remaining objects
-            for (const auto& obj : src->GetObjects()) {
-                if (obj->IsIndirect() && ref_map.find(obj->GetIndirectReference()) == ref_map.end()) {
-                    auto copied_obj = &dest->GetObjects().CreateObject(*obj);
-                    ref_map[obj->GetIndirectReference()] = copied_obj;
-                }
-            }
-            // fix references in appended objects
-            for (auto& elem : ref_map) ref_map.apply(*elem.second);
-            // fixup all pages
-            for (auto& x : pages) {
-                auto& src_page = *x.src_page;
-                auto& dest_page = *x.dest_page;
-                dest_page.GetDictionary().AddKey("Parent", x.dest_page_parent);
-                // Set the page contents
-                if (auto key = src_page.GetDictionary().GetKeyAs<PdfReference>(PdfName::KeyContents); key.IsIndirect()) {
-                    if (auto search = ref_map.find(key); search != ref_map.end()) {
-                        dest_page.GetOrCreateContents().Reset(search->second);
+class MapReferences {
+    private:
+        std::unordered_map<PdfReference, PdfObject*, PdfReferenceHasher> refs;
+        
+    public:
+        void apply(PdfObject& obj) {
+            switch(obj.GetDataType()) {
+                case PdfDataType::Dictionary:
+                    for (auto& pair : obj.GetDictionary()) {
+                        apply(*pair.second);
                     }
-                }
-                // ensure the contents is not NULL to prevent segfaults in other code that assumes it
-                dest_page.GetOrCreateContents();
-
-                // Set the page resources
-                if (src_page.GetResources() != nullptr) {
-                    const auto &src_resources = src_page.GetResources()->GetDictionary();
-                    dest_page.GetOrCreateResources().GetDictionary() = src_resources;
-                    ref_map.apply(dest_page.GetResources()->GetObject());
-                } else dest_page.GetOrCreateResources();
-
-                // Copy inherited properties
-                auto inherited = inheritableAttributes;
-                while (!inherited->IsNull()) {
-                    auto attribute = src_page.GetDictionary().FindKeyParent(*inherited);
-                    if (attribute != nullptr) {
-                        PdfObject attributeCopy(*attribute);
-                        ref_map.apply(attributeCopy);
-                        dest_page.GetDictionary().AddKey(*inherited, attributeCopy);
+                    break;
+                    
+                case PdfDataType::Array:
+                    for (auto& item : obj.GetArray()) {
+                        apply(item);
                     }
-                    inherited++;
-                }
+                    break;
+                    
+                case PdfDataType::Reference:
+                    if (auto it = refs.find(obj.GetReference()); it != refs.end()) {
+                        obj = PdfObject(it->second->GetReference());
+                    }
+                    break;
+                    
+                default:
+                    break;
             }
         }
-    } catch (const PdfError & err) {
-        PyEval_RestoreThread(_save);
+        
+        void insert(const PdfReference& ref, PdfObject* obj) {
+            refs[ref] = obj;
+        }
+    };
+
+static PyObject*
+PDFDoc_append(PDFDoc* self, PyObject* args) {
+    // Destination document
+    PdfMemDocument* dest = self->doc;
+    
+    // Create references map
+    MapReferences ref_map;
+    
+    try {
+        // Get source documents
+        std::vector<const PdfMemDocument*> docs(PyTuple_GET_SIZE(args));
+        for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(args); i++) {
+            PyObject* doc = PyTuple_GET_ITEM(args, i);
+            if (!PyObject_IsInstance(doc, (PyObject*)&PDFDocType)) {
+                PyErr_SetString(PyExc_TypeError, "Arguments must be PDFDoc instances");
+                return nullptr;
+            }
+            docs[i] = ((PDFDoc*)doc)->doc;
+        }
+
+        // Calculate total pages to append
+        size_t total_pages = 0;
+        for (auto src : docs) {
+            total_pages += src->GetPageCount();
+        }
+        
+        // Create pages in destination
+        size_t dest_page_idx = dest->GetPageCount();
+        
+        // Copy pages and resources
+        for (auto src : docs) {
+            for (size_t i = 0; i < src->GetPageCount(); i++) {
+                const auto& src_page = src->GetPage(i);
+                auto& dest_page = dest->CreatePage(dest_page_idx++);
+                
+                // Copy page contents
+                dest_page.GetContents()->Reset(src_page.GetContents());
+                
+                // Copy page resources
+                if (src_page.GetResources()) {
+                    dest_page.GetResources()->GetDictionary() = 
+                        src_page.GetResources()->GetDictionary();
+                }
+                
+                // Update references
+                ref_map.insert(src_page.GetObject().GetReference(), 
+                             &dest_page.GetObject());
+            }
+        }
+        
+        // Fix up references
+        for (size_t i = 0; i < dest->GetPageCount(); i++) {
+            ref_map.apply(dest->GetPage(i).GetObject());
+        }
+
+    } catch (const PdfError& err) {
         podofo_set_exception(err);
-        return NULL;
-    } catch (std::exception & err) {
-        PyEval_RestoreThread(_save);
-        PyErr_Format(PyExc_ValueError, "An error occurred while trying to append pages: %s", err.what());
-        return NULL;
+        return nullptr;
     }
-    PyEval_RestoreThread(_save);
+    
     Py_RETURN_NONE;
-} // }}}
+}
 
 // insert_existing_page() {{{
 static PyObject *
@@ -1029,3 +999,20 @@ PyTypeObject pdf::PDFDocType = {
     /* tp_new            */ PDFDoc_new,
 };
 // }}}
+
+bool remove_font(PdfDocument& doc, PdfObject* font) {
+    if (!font) return false;
+    
+    auto& objects = doc.GetObjects();
+    PdfDictionary dict;
+    
+    if (font->GetDictionary(dict)) {
+        if (auto desc = dict.FindKey("FontDescriptor")) {
+            if (auto ff = get_font_file(desc))
+                objects.RemoveObject(ff->GetIndirectReference());
+            objects.RemoveObject(desc->GetIndirectReference());
+        }
+        objects.RemoveObject(font->GetIndirectReference());
+    }
+    return true;
+}

@@ -6,268 +6,296 @@
  */
 
 #include "global.h"
-#include <iostream>
 #include <memory>
+#include <string>
 #include <stack>
 
 using namespace pdf;
 
-static inline PyObject*
-ref_as_tuple(const PdfReference &ref) {
-    unsigned long num = ref.ObjectNumber(), generation = ref.GenerationNumber();
-    return Py_BuildValue("kk", num, generation);
-}
-
-static inline PdfObject*
-get_font_file(PdfObject *descriptor) {
-    PdfDictionary *dict;
-    PdfObject *ff = NULL;
-    if (descriptor->TryGetDictionary(dict)) {
-        ff = dict->FindKey("FontFile");
-        if (!ff) ff = dict->FindKey("FontFile2");
-        if (!ff) ff = dict->FindKey("FontFile3");
-    }
-    return ff;
-}
-
-static inline const PdfObject*
-get_font_file(const PdfObject *descriptor) {
-    const PdfDictionary *dict;
-    const PdfObject *ff = NULL;
-    if (descriptor->TryGetDictionary(dict)) {
-        ff = dict->FindKey("FontFile");
-        if (!ff) ff = dict->FindKey("FontFile2");
-        if (!ff) ff = dict->FindKey("FontFile3");
-    }
-    return ff;
-}
-
-
-static inline void
-remove_font(PdfIndirectObjectList &objects, PdfObject *font) {
-    PdfDictionary *dict;
-    if (font->TryGetDictionary(dict)) {
-        PdfObject *descriptor = dict->FindKey("FontDescriptor");
-        if (descriptor) {
-            const PdfObject *ff = get_font_file(descriptor);
-            if (ff) objects.RemoveObject(object_as_reference(ff)).reset();
-            objects.RemoveObject(object_as_reference(descriptor)).reset();
+// Helper functions for modern PoDoFo API
+namespace pdf {
+ 
+    // Update StreamData class
+    class StreamData {
+    private:
+        std::vector<char> data;
+        
+    public:
+        explicit StreamData(const PdfObject* obj) {
+            if (!obj || !obj->GetStream()) return;
+            const auto stream = obj->GetStream();
+            const auto size = stream->GetLength();
+            if (size > 0) {
+                data.resize(size);
+                stream->GetFilteredCopy(data.data(), size);
+            }
         }
+        
+        const std::vector<char>& getData() const { return data; }
+        bool empty() const { return data.empty(); }
+        size_t size() const { return data.size(); }
+    };
+
+    // Output stream helper
+    class PyBytesOutputStream {
+    private:
+        std::vector<char> buffer;
+    public:
+        void write(const char* data, size_t size) {
+            buffer.insert(buffer.end(), data, data + size);
+        }
+        
+        PyObject* get_or_none() const {
+            if (buffer.empty()) Py_RETURN_NONE;
+            return PyBytes_FromStringAndSize(buffer.data(), buffer.size());
+        }
+    };
+
+    // Helper functions
+    inline PdfObject* 
+    get_font_file(const PdfObject* descriptor) {
+        if (!descriptor || !descriptor->IsDictionary()) return nullptr;
+        const auto& dict = descriptor->GetDictionary();
+        for (const char* key : {"FontFile", "FontFile2", "FontFile3"}) {
+            if (auto ff = dict.FindKey(key)) 
+                return const_cast<PdfObject*>(ff);
+        }
+        return nullptr;
     }
-    objects.RemoveObject(object_as_reference(font)).reset();
+
+static void remove_font(PdfMemDocument& doc, PdfObject* font) {
+    if (!font) return;
+    auto& objects = doc.GetObjects();
+    const auto& dict = font->GetDictionary();
+    
+    if (auto descriptor = dict.FindKey("FontDescriptor")) {
+        if (auto ff = get_font_file(descriptor)) {
+            objects.RemoveObject(ff->GetReference());
+        }
+        objects.RemoveObject(descriptor->GetReference());
+    }
+    objects.RemoveObject(font->GetReference());
 }
 
-static void
-used_fonts_in_canvas(const PdfCanvas &canvas, unordered_reference_set &ans) {
-    PdfPostScriptTokenizer tokenizer;
-    PdfCanvasInputDevice input(canvas);
-    bool in_text_block = false;
-    PdfPostScriptTokenType contents_type;
-    PdfVariant var;
-    std::stack<PdfVariant> stack;
-    const PdfDictionary &resources = canvas.GetResources()->GetDictionary();
-    if (!resources.HasKey("Font")) return;
-    const PdfDictionary &fonts_dict = resources.GetKey("Font")->GetDictionary();
-    std::string_view keyword;
-
-    while (tokenizer.TryReadNext(input, contents_type, keyword, var)) {
-        if (contents_type == PdfPostScriptTokenType::Variant) stack.push(var);
-        if (contents_type != PdfPostScriptTokenType::Keyword) continue;
-        const char *token = keyword.data();
-        if (strcmp(token, "BT") == 0) {
-            in_text_block = true;
-            continue;
-        } else if (strcmp(token, "ET") == 0) {
-            in_text_block = false;
-            continue;
-        }
-        if (!in_text_block) continue;
-        if (strcmp(token, "Tf") == 0) {
-            stack.pop();
-            if (stack.size() > 0 && stack.top().IsName()) {
-                const PdfName &reference_name = stack.top().GetName();
-                const PdfObject *f = fonts_dict.GetKey(reference_name);
-                if (f) ans.insert(object_as_reference(f));
+void used_fonts_in_canvas(const PdfCanvas& canvas, unordered_reference_set& ans) {
+    if (auto resources = canvas.GetResources()) {
+        const auto& dict = resources->GetDictionary();
+        if (!dict.HasKey("Font")) return;
+        
+        const auto& fonts = dict.GetKey("Font")->GetDictionary();
+        if (auto contents = canvas.GetContentsObject()) {
+            PdfContentsTokenizer tokenizer(canvas.GetObject());
+            const char* token = nullptr;
+            PdfVariant var;
+            bool in_text = false;
+            
+            while (tokenizer.ReadNext(token, var)) {
+                if (token) {
+                    if (strcmp(token, "BT") == 0) in_text = true;
+                    else if (strcmp(token, "ET") == 0) in_text = false;
+                    else if (in_text && strcmp(token, "Tf") == 0) {
+                        if (auto font = fonts.FindKey(var.GetName())) {
+                            ans.insert(font->GetReference());
+                        }
+                    }
+                }
             }
         }
     }
-    return;
 }
 
 static PyObject*
-convert_w_array(const PdfArray &w) {
-    pyunique_ptr ans(PyList_New(0));
-    if (!ans) return NULL;
-    for (PdfArray::const_iterator it = w.begin(); it != w.end(); it++) {
-        pyunique_ptr item;
-        if ((*it).IsArray()) {
-            item.reset(convert_w_array((*it).GetArray()));
-        } else if ((*it).IsRealStrict()) {
-            item.reset(PyFloat_FromDouble((*it).GetReal()));
-        } else if ((*it).IsNumber()) {
-            item.reset(PyLong_FromLongLong((long long)(*it).GetNumber()));
-        } else PyErr_SetString(PyExc_ValueError, "Unknown datatype in w array");
-        if (!item) return NULL;
-        if (PyList_Append(ans.get(), item.get()) != 0) return NULL;
-    }
-    return ans.release();
-}
-
-static PyObject*
-list_fonts(PDFDoc *self, PyObject *args) {
+list_fonts(PDFDoc* self, PyObject* args) {
     int get_font_data = 0;
-    if (!PyArg_ParseTuple(args, "|i", &get_font_data)) return NULL;
-    pyunique_ptr ans(PyList_New(0));
-    if (!ans) return NULL;
-    const PdfIndirectObjectList &objects = self->doc->GetObjects();
-    for (auto &it : objects) {
-        if (it->IsDictionary()) {
-            const PdfDictionary &dict = it->GetDictionary();
-            if (dictionary_has_key_name(dict, PdfName::KeyType, "Font") && dict.HasKey("BaseFont")) {
-                const std::string &name = dict.GetKey("BaseFont")->GetName().GetString();
-                const std::string &subtype = dict.GetKey(PdfName::KeySubtype)->GetName().GetString();
-                const PdfReference &ref = object_as_reference(it);
-                unsigned long num = ref.ObjectNumber(), generation = ref.GenerationNumber();
-                const PdfObject *descriptor = dict.FindKey("FontDescriptor");
-                pyunique_ptr descendant_font, stream_ref, encoding, w, w2;
-                PyBytesOutputStream stream_data, to_unicode, cid_gid_map;
-                if (dict.HasKey("W")) {
-                    w.reset(convert_w_array(dict.GetKey("W")->GetArray()));
-                    if (!w) return NULL;
-                }
-                if (dict.HasKey("W2")) {
-                    w2.reset(convert_w_array(dict.GetKey("W2")->GetArray()));
-                    if (!w2) return NULL;
-                }
-                if (dict.HasKey("Encoding") && dict.GetKey("Encoding")->IsName()) {
-                    encoding.reset(PyUnicode_FromString(dict.GetKey("Encoding")->GetName().GetString().c_str()));
-                    if (!encoding) return NULL;
-                }
-				if (dict.HasKey("CIDToGIDMap") && (!dict.GetKey("CIDToGIDMap")->IsName() || strcmp(dict.GetKey("CIDToGIDMap")->GetName().GetString().c_str(), "Identity") != 0)) {
-					const PdfObjectStream *stream = dict.GetKey("CIDToGIDMap")->GetStream();
-					if (stream) stream->CopyToSafe(cid_gid_map);
-				}
-                if (descriptor) {
-                    const PdfObject *ff = get_font_file(descriptor);
-                    if (ff) {
-                        stream_ref.reset(ref_as_tuple(object_as_reference(ff)));
-                        if (!stream_ref) return NULL;
-                        const PdfObjectStream *stream = ff->GetStream();
-                        if (stream && get_font_data) {
-                            stream->CopyToSafe(stream_data);
-                        }
-                    }
-                } else if (dict.HasKey("DescendantFonts")) {
-                    const PdfArray &df = dict.GetKey("DescendantFonts")->GetArray();
-                    descendant_font.reset(ref_as_tuple(object_as_reference(df[0])));
-                    if (!descendant_font) return NULL;
-                    if (get_font_data && dict.HasKey("ToUnicode")) {
-                        const PdfReference &uref = object_as_reference(dict.GetKey("ToUnicode"));
-                        PdfObject *t = objects.GetObject(uref);
-                        if (t) {
-                            PdfObjectStream *stream = t->GetStream();
-                            if (stream) stream->CopyToSafe(to_unicode);
-                        }
-                    }
-                }
-#define V(x) (x ? x.get() : Py_None)
-                pyunique_ptr d(Py_BuildValue(
-                        "{ss ss s(kk) sO sO sO sO sO sO sO sO}",
-                        "BaseFont", name.c_str(),
-                        "Subtype", subtype.c_str(),
-                        "Reference", num, generation,
-                        "Data", V(stream_data),
-                        "DescendantFont", V(descendant_font),
-                        "StreamRef", V(stream_ref),
-                        "Encoding", V(encoding),
-                        "ToUnicode", V(to_unicode),
-                        "W", V(w), "W2", V(w2),
-						"CIDToGIDMap", V(cid_gid_map)
-                ));
-#undef V
-                if (!d) { return NULL; }
-                if (PyList_Append(ans.get(), d.get()) != 0) return NULL;
+    if (!PyArg_ParseTuple(args, "|p", &get_font_data)) return NULL;
+
+    try {
+        pyunique_ptr ans(PyList_New(0));
+        if (!ans) return NULL;
+
+        for (auto& obj : self->doc->GetObjects()) {
+            if (!obj->IsDictionary()) continue;
+            const auto& dict = obj->GetDictionary();
+            
+            if (!dictionary_has_key_name(dict, "Type", "Font") || 
+                !dict.HasKey("BaseFont")) continue;
+
+            const auto& name = dict.GetKey("BaseFont")->GetString();
+            const auto& subtype = dict.GetKey("Subtype")->GetString();
+            const auto& ref = obj->GetReference();
+
+            PyBytesOutputStream stream_data, to_unicode;
+        pyunique_ptr descendant_font, stream_ref, encoding, w, w2;
+
+        // Handle width arrays
+        if (auto width_arr = dict.FindKey("W")) {
+            w.reset(convert_w_array(width_arr->GetArray()));
+            if (!w) return NULL;
+        }
+        if (auto width2_arr = dict.FindKey("W2")) {
+            w2.reset(convert_w_array(width2_arr->GetArray()));
+            if (!w2) return NULL;
+        }
+
+        // Handle encoding
+        if (auto enc = dict.FindKey("Encoding")) {
+            if (enc->IsName()) {
+                encoding.reset(PyUnicode_FromString(enc->GetName().GetString().c_str()));
+                if (!encoding) return NULL;
             }
         }
+
+        // Handle CID to GID mapping
+        if (auto cid_map = dict.FindKey("CIDToGIDMap")) {
+            if (!cid_map->IsName() || cid_map->GetName().GetString() != "Identity") {
+                if (auto stream = cid_map->GetStream()) {
+                    stream->CopyToSafe(cid_gid_map);
+                }
+            }
+        }
+
+        // Handle font descriptor and font data
+        if (const PdfObject* descriptor = dict.FindKey("FontDescriptor")) {
+            if (const PdfObject* ff = get_font_file(descriptor)) {
+                stream_ref.reset(ref_as_tuple(ff->GetIndirectReference()));
+                if (!stream_ref) return NULL;
+                if (get_font_data) {
+                    if (auto stream = ff->GetStream()) {
+                        stream->CopyToSafe(stream_data);
+                    }
+                }
+            }
+        } 
+        // Handle descendant fonts and ToUnicode
+        else if (auto df = dict.FindKey("DescendantFonts")) {
+            const PdfArray& desc_fonts = df->GetArray();
+            descendant_font.reset(ref_as_tuple(desc_fonts[0].GetReference()));
+            if (!descendant_font) return NULL;
+
+            if (get_font_data && dict.HasKey("ToUnicode")) {
+                if (auto unicode = dict.FindKey("ToUnicode")) {
+                    if (auto stream = unicode->GetStream()) {
+                        stream->CopyToSafe(to_unicode);
+                    }
+                }
+            }
+        }
+
+        // Build font info dictionary
+        pyunique_ptr font_dict(Py_BuildValue(
+            "{ss ss s(kk) sO sO sO sO sO sO sO sO}",
+            "BaseFont", name.c_str(),
+            "Subtype", subtype.c_str(),
+            "Reference", ref.ObjectNumber(), ref.GenerationNumber(),
+            "Data", stream_data.get_or_none(),
+            "DescendantFont", descendant_font.get_or_none(),
+            "StreamRef", stream_ref.get_or_none(),
+            "Encoding", encoding.get_or_none(),
+            "ToUnicode", to_unicode.get_or_none(),
+            "W", w.get_or_none(),
+            "W2", w2.get_or_none(),
+            "CIDToGIDMap", cid_gid_map.get_or_none()
+        ));
+        if (!font_dict) return NULL;
+
+        if (PyList_Append(ans.get(), font_dict.get()) != 0) return NULL;
     }
-    return ans.release();
+
+        return ans.release();
+    } catch (const PdfError& err) {
+        podofo_set_exception(err);
+        return NULL;
+    }
 }
+
+// Rest of the implementation...
 
 typedef std::unordered_map<PdfReference, unsigned long, PdfReferenceHasher> charprocs_usage_map;
 
-static PyObject*
-remove_unused_fonts(PDFDoc *self, PyObject *args) {
-    unsigned long count = 0;
-    unordered_reference_set used_fonts;
-    // Look in Pages
-    PdfPageCollection *pages = &self->doc->GetPages();
-    for (unsigned i = 0; i < pages->GetCount(); i++) {
-        used_fonts_in_canvas(self->doc->GetPages().GetPageAt(i), used_fonts);
-    }
-    // Look in XObjects
-    PdfIndirectObjectList &objects = self->doc->GetObjects();
-    for (PdfObject *k : objects) {
-        if (k->IsDictionary()) {
-            const PdfDictionary &dict = k->GetDictionary();
-            if (dictionary_has_key_name(dict, PdfName::KeyType, "XObject") && dictionary_has_key_name(dict, PdfName::KeySubtype, "Form")) {
-                std::unique_ptr<PdfXObjectForm> xo;
-                if (PdfXObject::TryCreateFromObject<PdfXObjectForm>(*k, xo)) used_fonts_in_canvas(*xo, used_fonts);
-            }
+void process_type3_font(PdfObject* obj, RefSet& refs) {
+    if (!obj || !obj->IsDictionary()) return;
+    
+    const auto& dict = obj->GetDictionary();
+    if (auto charProcs = dict.FindKey("CharProcs")) {
+        for (auto& entry : charProcs->GetDictionary()) {
+            refs.insert(entry.second->GetReference());
         }
     }
-    unordered_reference_set all_fonts;
-    unordered_reference_set type3_fonts;
-    charprocs_usage_map charprocs_usage;
-    for (auto &k : objects) {
-        if (k->IsDictionary()) {
-            const PdfDictionary &dict = k->GetDictionary();
-            if (dictionary_has_key_name(dict, PdfName::KeyType, "Font")) {
-                const std::string &font_type = dict.GetKey(PdfName::KeySubtype)->GetName().GetString();
-                if (font_type == "Type0") {
-                    all_fonts.insert(object_as_reference(k));
-                } else if (font_type == "Type3") {
-                    all_fonts.insert(object_as_reference(k));
-                    type3_fonts.insert(object_as_reference(k));
-                    for (auto &x : dict.GetKey("CharProcs")->GetDictionary()) {
-                        const PdfReference &ref = object_as_reference(x.second);
-                        if (charprocs_usage.find(ref) == charprocs_usage.end()) charprocs_usage[ref] = 1;
-                        else charprocs_usage[ref] += 1;
-                    }
+}
+
+static PyObject* remove_unused_fonts(PDFDoc* self, PyObject* args) {
+        try {
+            auto& doc = *self->doc;
+            unsigned long count = 0;
+            unordered_reference_set used_fonts;
+
+            // Collect used fonts from pages
+            auto& pages = doc.GetPages();
+            for (unsigned i = 0; i < pages.GetCount(); i++) {
+                used_fonts_in_canvas(pages.GetPageAt(i), used_fonts);
+            }
+
+            // Collect used fonts from XObjects
+            auto& objects = doc.GetObjects();
+            for (auto* obj : objects) {
+                if (!obj->IsDictionary()) continue;
+                
+                const auto& dict = obj->GetDictionary();
+                if (!dictionary_has_key_name(dict, PdfName::KeyType, "XObject") ||
+                    !dictionary_has_key_name(dict, PdfName::KeySubtype, "Form")) {
+                    continue;
+                }
+
+                if (auto form = PdfXObject::GetFromObject<PdfXObjectForm>(*obj)) {
+                    used_fonts_in_canvas(*form, used_fonts);
                 }
             }
-        }
-    }
 
-    for (auto &ref : all_fonts) {
-        if (used_fonts.find(ref) == used_fonts.end()) {
-            PdfObject *font = objects.GetObject(ref);
-            if (font) {
-                count++;
-                PdfDictionary *dict;
-                if (font->TryGetDictionary(dict)) {
-                if (type3_fonts.find(ref) != type3_fonts.end()) {
-                    for (auto &x : dict->FindKey("CharProcs")->GetDictionary()) {
-                        charprocs_usage[object_as_reference(x.second)] -= 1;
-                    }
-                } else {
-                    for (auto &x : dict->FindKey("DescendantFonts")->GetArray()) {
-                        PdfObject *dfont = objects.GetObject(object_as_reference(x));
-                        if (dfont) remove_font(objects, dfont);
-                    }
-                }}
-                remove_font(objects, font);
+            // Remove unused fonts
+            unordered_reference_set all_fonts;
+            CharProcRefMap charprocs_usage;
+
+            // First pass: collect fonts and usage info
+            for (auto* obj : objects) {
+                if (!obj->IsDictionary()) continue;
+                
+                const auto& dict = obj->GetDictionary();
+                if (!dictionary_has_key_name(dict, PdfName::KeyType, "Font")) continue;
+
+                const auto& font_type = dict.GetKey(PdfName::KeySubtype)->GetName().GetString();
+                const auto ref = obj->GetIndirectReference();
+
+                if (font_type == "Type3") {
+                    all_fonts.insert(ref);
+                    process_type3_font(obj, charprocs_usage);
+                } else if (font_type == "Type0") {
+                    all_fonts.insert(ref);
+                }
             }
+
+            // Second pass: remove unused fonts
+            for (const auto& ref : all_fonts) {
+                if (used_fonts.find(ref) != used_fonts.end()) continue;
+
+                auto* font = objects.GetObject(ref);
+                if (!font) continue;
+
+                count++;
+                remove_font(doc, font);
+            }
+
+            cleanup_unused_charprocs(doc, charprocs_usage);
+
+            return Py_BuildValue("k", count);
+
+        } catch (const PdfError& err) {
+            podofo_set_exception(err);
+            return nullptr;
+        } catch (const std::exception& err) {
+            PyErr_SetString(Error, err.what());
+            return nullptr;
         }
     }
-
-    for (auto &x : charprocs_usage) {
-        if (x.second == 0u) {
-            objects.RemoveObject(x.first).reset();
-        }
-    }
-
-    return Py_BuildValue("k", count);
-}
 
 PyObject*
 replace_font_data(PDFDoc *self, PyObject *args) {
@@ -324,31 +352,40 @@ merge_fonts(PDFDoc *self, PyObject *args) {
 	Py_RETURN_NONE;
 }
 
+// Update CharProc implementation
 class CharProc {
-    charbuff buf;
+private:
+    std::vector<char> buf;
     PdfReference ref;
-    CharProc( const CharProc & ) ;
-    CharProc & operator=( const CharProc & ) ;
+    
+public:
+    CharProc(const PdfReference& reference, const PdfObject* obj) : ref(reference) {
+        if (!obj || !obj->GetStream()) return;
+        char* buffer = nullptr;
+        pdf_long size = 0;
+        obj->GetStream()->GetFilteredCopy(&buffer, &size);
+        if (buffer) {
+            buf.assign(buffer, buffer + size);
+            free(buffer);
+        }
+    }
+        
+        CharProc(CharProc&& other) noexcept = default;
+        
+        CharProc& operator=(CharProc&& other) noexcept = default;
+        bool operator==(const CharProc& other) const noexcept {
+            return buf == other.buf;
+        }
 
-    public:
-        CharProc(const PdfReference &reference, const PdfObject *o) : buf(), ref(reference) {
-            const PdfObjectStream *stream = o->GetStream();
-            buf = stream->GetCopySafe();
-        }
-        CharProc(CharProc &&other) noexcept :
-            buf(std::move(other.buf)), ref(other.ref) {
-            other.buf = charbuff();
-        }
-        CharProc& operator=(CharProc &&other) noexcept {
-            buf = std::move(other.buf); other.buf = charbuff(); ref = other.ref;
-            return *this;
-        }
-        bool operator==(const CharProc &other) const noexcept {
-            return buf.size() == other.buf.size() && memcmp(buf.data(), other.buf.data(), buf.size()) == 0;
-        }
-        std::size_t hash() const noexcept { return buf.size(); }
+        std::size_t hash() const noexcept {
+    return std::hash<std::string_view>{}(std::string_view(buf.data(), buf.size()));
+}
+
         const PdfReference& reference() const noexcept { return ref; }
-};
+        
+        CharProc(const CharProc&) = delete;
+        CharProc& operator=(const CharProc&) = delete;
+    };
 
 struct CharProcHasher {
     std::size_t operator()(const CharProc& k) const { return k.hash(); }
@@ -356,67 +393,99 @@ struct CharProcHasher {
 
 typedef std::unordered_map<CharProc, std::vector<PdfReference>, CharProcHasher> char_proc_reference_map;
 
+// Update dedup_type3_fonts implementation
 static PyObject*
-dedup_type3_fonts(PDFDoc *self, PyObject *args) {
-    unsigned long count = 0;
-    unordered_reference_set all_char_procs;
-    unordered_reference_set all_type3_fonts;
-    char_proc_reference_map cp_map;
+dedup_type3_fonts(PDFDoc* self, PyObject* args) {
+    try {
+        auto& doc = *self->doc;
+        unsigned long count = 0;
+        unordered_reference_set all_char_procs;
+        unordered_reference_set all_type3_fonts;
+        char_proc_reference_map cp_map;
 
-    PdfIndirectObjectList &objects = self->doc->GetObjects();
-    for (auto &k : objects) {
-        if (!k->IsDictionary()) continue;
-        const PdfDictionary &dict = k->GetDictionary();
-        if (dictionary_has_key_name(dict, PdfName::KeyType, "Font")) {
-            const std::string &font_type = dict.GetKey(PdfName::KeySubtype)->GetName().GetString();
-            if (font_type == "Type3") {
-                all_type3_fonts.insert(object_as_reference(k));
-                for (auto &x : dict.GetKey("CharProcs")->GetDictionary()) {
-                    const PdfReference &ref = object_as_reference(x.second);
-                    const PdfObject *cpobj = objects.GetObject(ref);
-                    if (!cpobj || !cpobj->HasStream()) continue;
-                    CharProc cp(ref, cpobj);
-                    auto it = cp_map.find(cp);
-                    if (it == cp_map.end()) {
-                        std::vector<PdfReference> vals;
-                        cp_map.insert(std::make_pair(std::move(cp), std::move(vals)));
-                    } else (*it).second.push_back(ref);
+        // Process Type3 fonts
+        for (auto& obj : doc.GetObjects()) {
+            if (!obj->IsDictionary()) continue;
+            const auto& dict = obj->GetDictionary();
+            
+            if (!dictionary_has_key_name(dict, PdfName::KeyType, "Font")) continue;
+            
+            const auto& font_type = dict.GetKey(PdfName::KeySubtype)->GetString();
+            if (font_type != "Type3") continue;
+
+            all_type3_fonts.insert(obj->GetReference());
+            
+            if (auto char_procs = dict.FindKey("CharProcs")) {
+                for (auto& entry : char_procs->GetDictionary()) {
+                    const auto& ref = entry.second->GetReference();
+                    if (auto* cpobj = doc.GetObjects().GetObject(ref)) {
+                        if (!cpobj->GetStream()) continue;
+                        
+                        CharProc cp(ref, cpobj);
+                        auto [it, inserted] = cp_map.try_emplace(std::move(cp), std::vector<PdfReference>());
+                        if (!inserted) {
+                            it->second.push_back(ref);
+                        }
+                    }
                 }
             }
         }
-    }
-    std::unordered_map<PdfReference, PdfReference, PdfReferenceHasher> ref_map;
-    for (auto &x : cp_map) {
-        if (x.second.size() > 0) {
-            const PdfReference &canonical_ref = x.first.reference();
-            for (auto &ref : x.second) {
+
+        // Deduplication logic
+        std::unordered_map<PdfReference, PdfReference, PdfReferenceHasher> ref_map;
+        for (const auto& [proc, refs] : cp_map) {
+            if (refs.empty()) continue;
+            
+            const auto& canonical_ref = proc.reference();
+            for (const auto& ref : refs) {
                 if (ref != canonical_ref) {
-                    ref_map[ref] = x.first.reference();
-                    objects.RemoveObject(ref).reset();
+                    ref_map[ref] = canonical_ref;
+                    doc.GetObjects().RemoveObject(ref);
                     count++;
                 }
             }
         }
-    }
-    if (count > 0) {
-        for (auto &ref : all_type3_fonts) {
-            PdfObject *font = objects.GetObject(ref);
-            PdfDictionary *d;
-            if (!font->TryGetDictionary(d)) continue;
-            PdfDictionary dict = d->FindKey("CharProcs")->GetDictionary();
-            PdfDictionary new_dict = PdfDictionary(dict);
-            bool changed = false;
-            for (auto &k : dict) {
-                auto it = ref_map.find(object_as_reference(k.second));
-                if (it != ref_map.end()) {
-                    new_dict.AddKey(k.first, (*it).second);
-                    changed = true;
+
+        // Update references
+        if (count > 0) {
+            for (const auto& ref : all_type3_fonts) {
+                if (auto* font = doc.GetObjects().GetObject(ref)) {
+                    auto& dict = font->GetDictionary();
+                    if (auto* char_procs = dict.FindKey("CharProcs")) {
+                        PdfDictionary new_dict;
+                        bool changed = false;
+
+                        for (const auto& entry : char_procs->GetDictionary()) {
+                            const auto& key = entry.first;
+                            const auto& value = entry.second;
+                            
+                            if (auto it = ref_map.find(value->GetReference()); 
+                                it != ref_map.end()) {
+                                new_dict.AddKey(key, PdfObject(it->second));
+                                changed = true;
+                            } else {
+                                new_dict.AddKey(key, *value);
+                            }
+                        }
+
+                        if (changed) {
+                            dict.AddKey("CharProcs", std::move(new_dict));
+                        }
+                    }
                 }
             }
-            if (changed) font->GetDictionary().AddKey("CharProcs", new_dict);
         }
+
+        return PyLong_FromUnsignedLong(count);
+    } catch (const PdfError& err) {
+        podofo_set_exception(err);
+        return nullptr;
+    } catch (const std::exception& err) {
+        PyErr_SetString(Error, err.what());
+        return nullptr;
     }
-    return Py_BuildValue("k", count);
+}
+
 }
 
 PYWRAP(list_fonts)

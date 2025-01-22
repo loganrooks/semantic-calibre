@@ -10,127 +10,113 @@
 
 using namespace pdf;
 
-// Constructor/destructor {{{
-static void
-dealloc(PDFOutlineItem* self)
-{
+namespace {
+
+void dealloc(PDFOutlineItem* self) {
+    self->item = nullptr;
     Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject *
-new_item(PyTypeObject *type, PyObject *args, PyObject *kwds)
-{
-    PDFOutlineItem *self;
-
-    self = (PDFOutlineItem *)type->tp_alloc(type, 0);
-    if (self != NULL) {
-        self->item = NULL;
-    }
-
-    return (PyObject *)self;
-}
-// }}}
-
-// erase() {{{
-static PyObject *
-erase(PDFOutlineItem *self, PyObject *args) {
-    try {
-        self->item->Erase();
-    } catch(const PdfError & err) {
-        podofo_set_exception(err);
-        return NULL;
-    }
-    Py_RETURN_NONE;
-} // }}}
-
-static PyObject *
+PyObject* 
 create(PDFOutlineItem *self, PyObject *args) {
     PyObject *as_child;
-    PDFOutlineItem *ans = NULL;
+    PDFOutlineItem *ans = nullptr;
     unsigned int num;
     double left = 0, top = 0, zoom = 0;
     PyObject *title_buf;
 
-    if (!PyArg_ParseTuple(args, "UIO|ddd", &title_buf, &num, &as_child, &left, &top, &zoom)) return NULL;
-
-    ans = PyObject_New(PDFOutlineItem, &PDFOutlineItemType);
-    if (ans == NULL) return NULL;
-    ans->doc = self->doc;
-    pyunique_ptr decref_ans_on_exit((PyObject*)ans);
+    if (!PyArg_ParseTuple(args, "UIO|ddd", &title_buf, &num, &as_child, &left, &top, &zoom)) 
+        return nullptr;
 
     try {
-        PdfString title = podofo_convert_pystring(title_buf);
-        const PdfPage *page = get_page(self->doc, num - 1);
-        if (!page) { PyErr_Format(PyExc_ValueError, "Invalid page number: %u", num); return NULL; }
-        auto dest = std::make_shared<PdfDestination>(*page, left, top, zoom);
-        if (PyObject_IsTrue(as_child)) {
-            ans->item = self->item->CreateChild(title, dest);
-        } else
-            ans->item = self->item->CreateNext(title, dest);
-    } catch (const PdfError &err) {
-        podofo_set_exception(err); return NULL;
-    } catch(const std::exception & err) {
-        PyErr_Format(PyExc_ValueError, "An error occurred while trying to create the outline: %s", err.what()); return NULL;
-    } catch (...) {
-        PyErr_SetString(PyExc_Exception, "An unknown error occurred while trying to create the outline item"); return NULL;
-    }
+        ans = PyObject_New(PDFOutlineItem, &PDFOutlineItemType);
+        if (!ans) return nullptr;
+        ans->doc = self->doc;
+        pyunique_ptr decref_ans_on_exit((PyObject*)ans);
 
-    return (PyObject*) decref_ans_on_exit.release();
+        // Convert title using modern API
+        PdfString title = pdf::podofo_convert_pystring(title_buf);
+
+        // Get target page using modern API
+        if (num == 0 || num > ans->doc->GetPageCount()) {
+            throw ::std::runtime_error("Invalid page number: " + ::std::to_string(num));
+        }
+        const PdfPage& page = ans->doc->GetPage(num - 1);
+
+        // Create destination with proper memory management
+        auto dest = std::make_unique<PdfDestination>(
+            const_cast<PdfPage*>(&page), 
+            left, top, zoom
+        );
+
+        // Create outline item
+        ans->item = PyObject_IsTrue(as_child) ? 
+            self->item->CreateChild(title, *dest) :
+            self->item->CreateNext(title, *dest);
+
+        if (!ans->item) {
+            throw ::std::runtime_error("Failed to create outline item");
+        }
+
+        return decref_ans_on_exit.release();
+
+    } catch (const PdfError &err) {
+        podofo_set_exception(err);
+        return nullptr;
+    } catch (const ::std::exception &err) {
+        PyErr_Format(PyExc_ValueError, "Error creating outline: %s", err.what());
+        return nullptr;
+    }
+}
+
+PyObject*
+erase(PDFOutlineItem *self, PyObject *args) {
+    try {
+        if (!self->item) {
+            throw ::std::runtime_error("No valid outline item");
+        }
+
+        self->item->Erase();
+        self->item = nullptr;
+
+        Py_RETURN_NONE;
+
+    } catch (const PdfError &err) {
+        podofo_set_exception(err);
+        return nullptr;
+    } catch (const ::std::exception &err) {
+        PyErr_Format(PyExc_ValueError, "Error erasing outline: %s", err.what());
+        return nullptr;
+    }
+}
+
+PyObject*
+new_item(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    PDFOutlineItem *self = (PDFOutlineItem*)type->tp_alloc(type, 0);
+    if (self) {
+        self->item = nullptr;
+        self->doc = nullptr;
+    }
+    return (PyObject*)self;
 }
 
 static PyMethodDef methods[] = {
-
     {"create", (PyCFunction)create, METH_VARARGS,
-        "create(title, pagenum, as_child=False) -> Create a new outline item with title 'title', pointing to page number pagenum. If as_child is True the new item will be a child of this item otherwise it will be a sibling. Returns the newly created item."
-    },
-
-    {"erase", (PyCFunction)erase, METH_VARARGS,
-        "erase() -> Delete this item and all its children, removing it from the outline tree completely."
-    },
-
-    {NULL}  /* Sentinel */
+     "Create a new outline item. Return a new outline item object."},
+    {"erase", (PyCFunction)erase, METH_NOARGS,
+     "Erase this outline item."},
+    {nullptr, nullptr, 0, nullptr}
 };
 
-
-// Type definition {{{
-PyTypeObject pdf::PDFOutlineItemType = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    /* tp_name           */ "podofo.PDFOutlineItem",
-    /* tp_basicsize      */ sizeof(PDFOutlineItem),
-    /* tp_itemsize       */ 0,
-    /* tp_dealloc        */ (destructor)dealloc,
-    /* tp_print          */ 0,
-    /* tp_getattr        */ 0,
-    /* tp_setattr        */ 0,
-    /* tp_compare        */ 0,
-    /* tp_repr           */ 0,
-    /* tp_as_number      */ 0,
-    /* tp_as_sequence    */ 0,
-    /* tp_as_mapping     */ 0,
-    /* tp_hash           */ 0,
-    /* tp_call           */ 0,
-    /* tp_str            */ 0,
-    /* tp_getattro       */ 0,
-    /* tp_setattro       */ 0,
-    /* tp_as_buffer      */ 0,
-    /* tp_flags          */ Py_TPFLAGS_DEFAULT,
-    /* tp_doc            */ "PDF Outline items",
-    /* tp_traverse       */ 0,
-    /* tp_clear          */ 0,
-    /* tp_richcompare    */ 0,
-    /* tp_weaklistoffset */ 0,
-    /* tp_iter           */ 0,
-    /* tp_iternext       */ 0,
-    /* tp_methods        */ methods,
-    /* tp_members        */ 0,
-    /* tp_getset         */ 0,
-    /* tp_base           */ 0,
-    /* tp_dict           */ 0,
-    /* tp_descr_get      */ 0,
-    /* tp_descr_set      */ 0,
-    /* tp_dictoffset     */ 0,
-    /* tp_init           */ 0,
-    /* tp_alloc          */ 0,
-    /* tp_new            */ new_item,
+PyTypeObject PDFOutlineItemType = {
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    .tp_name = "outline.PDFOutlineItem",
+    .tp_basicsize = sizeof(PDFOutlineItem),
+    .tp_dealloc = (destructor)dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = "PDF Outline items",
+    .tp_methods = methods,
+    .tp_new = new_item,
 };
-// }}}
+
+} // anonymous namespace

@@ -23,7 +23,7 @@
 #include <os/log.h>
 #endif
 #include <bypy-freeze.h>
-
+#define PODOFO_VERSION_0_9_8
 
 static void
 pre_initialize_interpreter(bool is_gui_app) {

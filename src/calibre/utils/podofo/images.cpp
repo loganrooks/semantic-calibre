@@ -1,150 +1,178 @@
-/*
- * impose.cpp
- * Copyright (C) 2019 Kovid Goyal <kovid at kovidgoyal.net>
- *
- * Distributed under terms of the GPL3 license.
- */
-
-#include "global.h"
-#include <functional>
-#include <string>
-
-using namespace pdf;
-
-typedef std::unordered_map<PdfReference, size_t, PdfReferenceHasher> hash_cache_map;
+namespace pdf {
 
 class Image {
-    charbuff buf;
-    int64_t width, height;
+private:
+    std::vector<char> buf;
+    int64_t width, height; 
     PdfReference ref;
     PdfReference smask;
     bool is_valid;
     size_t content_hash, overall_hash;
 
-    Image( const Image & ) ;
-    Image & operator=( const Image & ) ;
+    Image(const Image&) = delete;
+    Image& operator=(const Image&) = delete;
 
-    public:
-        Image(const PdfReference &reference, const PdfObject *o, hash_cache_map &hash_cache) : buf(), width(0), height(0), ref(reference) {
-            const PdfObjectStream *stream = o->GetStream();
-            try {
-                buf = stream->GetCopySafe();
-                is_valid = true;
-            } catch(...) {
-                buf = charbuff();
-                is_valid = false;
+public:
+    Image(const PdfReference& reference, const PdfObject* obj,
+          std::unordered_map<PdfReference, size_t, PdfReferenceHasher>& hash_cache)
+        : width(0), height(0), ref(reference), is_valid(false) {
+        
+        try {
+            if (const auto stream = obj->GetStream()) {
+                const auto size = stream->GetLength();
+                if (size > 0) {
+                    buf.resize(size);
+                    stream->CopyToSafe(buf.data(), size);
+                    is_valid = true;
+                }
             }
-            const PdfDictionary &dict = o->GetDictionary();
-            if (dict.HasKey("Width") && dict.GetKey("Width")->IsNumber()) width = dict.GetKey("Width")->GetNumber();
-            if (dict.HasKey("Height") && dict.GetKey("Height")->IsNumber()) height = dict.GetKey("Height")->GetNumber();
-            if (dict.HasKey("SMask") && dict.GetKey("SMask")->IsReference()) smask = dict.GetKey("SMask")->GetReference();
-            std::hash<std::string> s;
+
+            const auto& dict = obj->GetDictionary();
+            width = dict.GetKeyAs<int64_t>("Width", 0);
+            height = dict.GetKeyAs<int64_t>("Height", 0);
+            
+            if (auto smask_obj = dict.FindKey("SMask")) {
+                if (smask_obj->IsReference()) {
+                    smask = smask_obj->GetReference();
+                }
+            }
+
             auto it = hash_cache.find(reference);
             if (it == hash_cache.end()) {
-                content_hash = s(buf);
-                hash_cache.insert(std::make_pair(reference, content_hash));
+                content_hash = std::hash<std::string_view>{}(
+                    std::string_view(buf.data(), buf.size())
+                );
+                hash_cache.emplace(reference, content_hash);
             } else {
                 content_hash = it->second;
             }
-            overall_hash = s(std::to_string(width) + " " + std::to_string(height) + " " + smask.ToString() + " " + std::to_string(content_hash));
+
+            overall_hash = std::hash<std::string>{}(
+                std::to_string(width) + " " + 
+                std::to_string(height) + " " + 
+                (smask.ObjectNumber() ? smask.ToString() : "") + " " +
+                std::to_string(content_hash)
+            );
+
+        } catch (...) {
+            is_valid = false;
+            buf.clear();
         }
-        Image(Image &&other) noexcept :
-            buf(std::move(other.buf)), width(other.width), height(other.height), ref(other.ref), smask(other.smask), content_hash(other.content_hash), overall_hash(other.overall_hash) {
-            other.buf = charbuff(); is_valid = other.is_valid;
-        }
-        Image& operator=(Image &&other) noexcept {
-            buf = std::move(other.buf); other.buf = charbuff(); ref = other.ref;
-            width = other.width; height = other.height; is_valid = other.is_valid;
-            smask = other.smask; content_hash = other.content_hash; overall_hash = other.overall_hash;
-            return *this;
-        }
-        bool operator==(const Image &other) const noexcept {
-            return other.width == width && is_valid && other.is_valid && other.height == height && other.smask == smask && other.buf == buf;
-        }
-        std::size_t hash() const noexcept { return overall_hash; }
-        const PdfReference& reference() const noexcept { return ref; }
-        std::string ToString() const {
-            return "Image(ref=" + ref.ToString() + ", width="s + std::to_string(width) + ", height="s + std::to_string(height) + ", smask="s + smask.ToString() + ", digest=" + std::to_string(content_hash) + ")";
-        }
+    }
+
+    Image(Image&& other) noexcept = default;
+
+    bool operator==(const Image& other) const noexcept {
+        return is_valid && other.is_valid &&
+               width == other.width &&
+               height == other.height && 
+               smask == other.smask &&
+               buf == other.buf;
+    }
+
+    std::size_t hash() const noexcept { return overall_hash; }
+    const PdfReference& reference() const noexcept { return ref; }
 };
 
 struct ImageHasher {
-    std::size_t operator()(const Image& k) const { return k.hash(); }
+    std::size_t operator()(const Image& k) const noexcept { return k.hash(); }
 };
 
-typedef std::unordered_map<Image, std::vector<PdfReference>, ImageHasher> image_reference_map;
+using ImageMap = std::unordered_map<Image, std::vector<PdfReference>, ImageHasher>;
 
 static unsigned long
-run_one_dedup_pass(PDFDoc *self, hash_cache_map &hash_cache) {
+run_one_dedup_pass(PDFDoc* self, std::unordered_map<PdfReference, size_t, PdfReferenceHasher>& hash_cache) {
     unsigned long count = 0;
-    PdfIndirectObjectList &objects = self->doc->GetObjects();
-    image_reference_map image_map;
+    auto& objects = self->doc->GetObjects();
+    ImageMap image_map;
+    std::unordered_map<PdfReference, PdfReference, PdfReferenceHasher> ref_map;
 
-    for (auto &k : objects) {
-        if (!k->IsDictionary()) continue;
-        const PdfDictionary &dict = k->GetDictionary();
-        if (dictionary_has_key_name(dict, PdfName::KeyType, "XObject") && dictionary_has_key_name(dict, PdfName::KeySubtype, "Image")) {
-            Image img(object_as_reference(k), k, hash_cache);
-            auto it = image_map.find(img);
-            if (it == image_map.end()) {
-                std::vector<PdfReference> vals;
-                image_map.insert(std::make_pair(std::move(img), std::move(vals)));
-            } else (*it).second.push_back(img.reference());
+    // Find all image objects
+    for (auto* obj : objects) {
+        if (!obj || !obj->IsDictionary()) continue;
+        const auto& dict = obj->GetDictionary();
+        if (dictionary_has_key_name(dict, "Type", "XObject") && 
+            dictionary_has_key_name(dict, "Subtype", "Image")) {
+            const auto ref = obj->GetReference();
+            Image img(ref, obj, hash_cache);
+            auto [it, inserted] = image_map.try_emplace(std::move(img), std::vector<PdfReference>());
+            if (!inserted) it->second.push_back(ref);
         }
     }
-    std::unordered_map<PdfReference, PdfReference, PdfReferenceHasher> ref_map;
-    for (auto &x : image_map) {
-        if (x.second.size() > 0) {
-            const PdfReference &canonical_ref = x.first.reference();
-            for (auto &ref : x.second) {
+
+    // Update references
+    for (const auto& [img, refs] : image_map) {
+        if (!refs.empty()) {
+            const auto& canonical_ref = img.reference();
+            for (const auto& ref : refs) {
                 if (ref != canonical_ref) {
                     ref_map[ref] = canonical_ref;
-                    objects.RemoveObject(ref).reset();
+                    objects.RemoveObject(ref);
                     count++;
                 }
             }
         }
     }
 
+    // Update resources
     if (count > 0) {
-        for (auto &k : objects) {
-            if (!k->IsDictionary()) continue;
-            PdfDictionary &dict = k->GetDictionary();
-            if (dict.HasKey("Resources") && dict.GetKey("Resources")->IsDictionary()) {
-                PdfDictionary &resources = dict.GetKey("Resources")->GetDictionary();
-                if (!resources.HasKey("XObject") || !resources.GetKey("XObject")->IsDictionary()) continue;
-                const PdfDictionary &xobject = resources.GetKey("XObject")->GetDictionary();
-                PdfDictionary new_xobject = PdfDictionary(xobject);
-                bool changed = false;
-                for (const auto &x : xobject) {
-                    if (x.second.IsReference()) {
-                        try {
-                            const PdfReference &r = ref_map.at(object_as_reference(x.second));
-                            new_xobject.AddKey(x.first, r);
-                            changed = true;
-                        } catch (const std::out_of_range &err) { (void)err; continue; }
+        for (auto* obj : objects) {
+            if (!obj || !obj->IsDictionary()) continue;
+            auto& dict = obj->GetDictionary();
+            
+            if (auto* resources = dict.FindKey("Resources")) {
+                if (resources->IsDictionary()) {
+                    auto& res_dict = resources->GetDictionary();
+                    if (auto* xobject = res_dict.FindKey("XObject")) {
+                        if (xobject->IsDictionary()) {
+                            bool changed = false;
+                            PdfDictionary new_xobj;
+                            
+                            for (auto& entry : xobject->GetDictionary()) {
+                                const auto& value = entry.second;
+                                if (value->IsReference()) {
+                                    auto it = ref_map.find(value->GetReference());
+                                    if (it != ref_map.end()) {
+                                        new_xobj.AddKey(entry.first, PdfObject(it->second));
+                                        changed = true;
+                                        continue;
+                                    }
+                                }
+                                new_xobj.AddKey(entry.first, *value);
+                            }
+                            
+                            if (changed) res_dict.AddKey("XObject", std::move(new_xobj));
+                        }
                     }
                 }
-                if (changed) resources.AddKey("XObject", new_xobject);
-            } else if (dictionary_has_key_name(dict, PdfName::KeyType, "XObject") && dictionary_has_key_name(dict, PdfName::KeySubtype, "Image") && dict.HasKey("SMask") && dict.MustGetKey("SMask").IsReference()) {
-                try {
-                    const PdfReference &r = ref_map.at(dict.MustGetKey("SMask").GetReference());
-                    dict.AddKey("SMask", r);
-                } catch (const std::out_of_range &err) { (void)err; }
             }
         }
     }
+    
     return count;
 }
 
-static PyObject*
-dedup_images(PDFDoc *self, PyObject *args) {
-    unsigned long count = 0;
-    hash_cache_map hash_cache;
-    count += run_one_dedup_pass(self, hash_cache);
-    count += run_one_dedup_pass(self, hash_cache);
-    return Py_BuildValue("k", count);
+} // namespace pdf
 
+// Python wrapper
+static PyObject* 
+dedup_images(pdf::PDFDoc* self, PyObject* args) {
+    unsigned long count = 0;
+    std::unordered_map<PdfReference, size_t, pdf::PdfReferenceHasher> hash_cache;
+
+    try {
+        count += pdf::run_one_dedup_pass(self, hash_cache);
+        count += pdf::run_one_dedup_pass(self, hash_cache); // Second pass for cascaded duplicates
+        return Py_BuildValue("k", count);
+    } catch (const PdfError& err) {
+        pdf::podofo_set_exception(err);
+        return NULL;
+    } catch (const std::exception& err) {
+        PyErr_Format(pdf::Error, "Error deduplicating images: %s", err.what());
+        return NULL;
+    }
 }
 
-PYWRAP(dedup_images)
+PYWRAP(dedup_images) {
+    return dedup_images(self, args);
+}
