@@ -56,3 +56,8 @@
 /cmake-build-*
 /bypy/b
 /bypy/virtual-machines.conf
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
