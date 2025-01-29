@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 from calibre.utils.config import JSONConfig
-from calibre.utils.sqlite import Connection
+from calibre.db.backend import Connection
+from calibre.utils.retry import retry
+from calibre.utils.rate_limit import RateLimiter
 
 class AbstractEmbedder(ABC):
     """Base class for text embedding providers with caching capabilities."""
@@ -13,6 +15,8 @@ class AbstractEmbedder(ABC):
         self.config = config
         self.db = db
         self._setup_schema()
+        # Default rate limit of 10 requests per minute
+        self.rate_limiter = RateLimiter(requests_per_minute=10)
         
     def _setup_schema(self) -> None:
         """Initialize required database tables"""
@@ -86,6 +90,23 @@ class AbstractEmbedder(ABC):
             VALUES (?, ?, ?, ?)
         ''', (model_id, text_hash, section, embedding_bytes))
         
+    @retry(max_retries=3, delay=1.0, backoff=2.0)
+    def _safe_embed(self, text: str, section: str) -> List[float]:
+        """Template method with retry logic for embedding generation"""
+        with self.rate_limiter():
+            return self.embed_text(text, section)
+            
+    def embed_with_cache(self, text: str, section: str) -> List[float]:
+        """Public method that handles caching and retries"""
+        cache_key = self.get_cache_key(text, section)
+        cached = self.get_cached(cache_key)
+        if cached is not None:
+            return cached
+            
+        embedding = self._safe_embed(text, section)
+        self.set_cache(cache_key, embedding)
+        return embedding
+
     @classmethod
     def get_config_template(cls) -> Dict[str, Any]:
         """Configuration schema for embedder-specific settings"""

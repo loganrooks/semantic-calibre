@@ -4,11 +4,7 @@ from .base import AbstractEmbedder
 from calibre.utils.config import JSONConfig
 from calibre.db.backend import Connection
 from calibre.utils.retry import retry
-
-# Fallback rate limiter if calibre.utils.rate_limit isn't available
-class RateLimiter:
-    def __init__(self, requests_per_minute: int):
-        self.delay = 60.0 / requests_per_minute
+from calibre.utils.rate_limit import RateLimiter
 
 class OpenAIEmbedder(AbstractEmbedder):
     """OpenAI API-based text embedding provider."""
