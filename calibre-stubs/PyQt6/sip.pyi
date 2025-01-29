@@ -131,4 +131,4 @@ def wrapinstance(*args, **kwargs):
     ...
 SIP_VERSION: int = 395270
 SIP_VERSION_STR: str = '6.8.6'
-_C_API: typing.Any  # value = <capsule object "PyQt6.sip._C_API" at 0x7fdbb616eca0>
+_C_API: typing.Any  # value = <capsule object "PyQt6.sip._C_API" at 0x7f34ec1c2c40>
