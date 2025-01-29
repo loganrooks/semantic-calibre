@@ -93,7 +93,7 @@ class AbstractEmbedder(ABC):
     @retry(max_retries=3, delay=1.0, backoff=2.0)
     def _safe_embed(self, text: str, section: str) -> List[float]:
         """Template method with retry logic for embedding generation"""
-        with self.rate_limiter():
+        with self.rate_limiter:
             return self.embed_text(text, section)
             
     def embed_with_cache(self, text: str, section: str) -> List[float]:
