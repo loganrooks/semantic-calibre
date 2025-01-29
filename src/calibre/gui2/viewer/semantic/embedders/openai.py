@@ -20,7 +20,7 @@ class OpenAIEmbedder(AbstractEmbedder):
         if not api_key:
             raise ValueError("OpenAI API key not configured")
             
-        openai.api_key = api_key
+        self.client = openai.OpenAI(api_key=api_key)
         self.model = self.config.get('model_version', 'text-embedding-3-small')
         
     @property
@@ -31,11 +31,13 @@ class OpenAIEmbedder(AbstractEmbedder):
     def embed_text(self, text: str, section: str) -> List[float]:
         """Generate embedding for a single text segment"""
         with self.rate_limiter:
-            response = openai.Embedding.create(
-                input=text,
+            # Include section in input text for better context
+            input_text = f"{section}: {text}" if section else text
+            response = self.client.embeddings.create(
+                input=input_text,
                 model=self.model
             )
-            return response['data'][0]['embedding']
+            return response.data[0].embedding
             
     @retry(max_retries=3, delay=1.0)
     def batch_embed(self, texts: List[str], sections: List[str]) -> List[List[float]]:
@@ -44,11 +46,15 @@ class OpenAIEmbedder(AbstractEmbedder):
             raise ValueError("OpenAI batch size limit exceeded")
             
         with self.rate_limiter:
-            response = openai.Embedding.create(
-                input=texts,
+            # Combine sections and texts for better context
+            inputs = [f"{sect}: {text}" if sect else text 
+                     for text, sect in zip(texts, sections)]
+            
+            response = self.client.embeddings.create(
+                input=inputs,
                 model=self.model
             )
-            return [item['embedding'] for item in response['data']]
+            return [item.embedding for item in response.data]
             
     @classmethod
     def get_config_template(cls) -> Dict[str, Any]:
@@ -56,7 +62,7 @@ class OpenAIEmbedder(AbstractEmbedder):
         base = super().get_config_template()
         base.update({
             "api_key": "",
-            "model_version": "text-embedding-3-small",
+            "model_version": "text-embedding-3-small", 
             "organization": "",
             "timeout": 30.0
         })

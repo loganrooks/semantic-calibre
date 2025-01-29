@@ -20,6 +20,11 @@ class RateLimiter:
         self._last_reset = time.monotonic()
         self._num_calls = 0
     
+    def __enter__(self):
+        """Rate limiting context entry"""
+        with self._lock:
+            now = time.monotonic()
+
     @contextmanager 
     def __call__(self):
         """Context manager for rate limiting."""
