@@ -1,33 +1,22 @@
 from threading import Lock
 import time
-from typing import Optional, Callable
-from contextlib import contextmanager
+from typing import Optional, Any
+from contextlib import AbstractContextManager
+from types import TracebackType
+from typing import Type
 
-class RateLimiter:
+class RateLimiter(AbstractContextManager[None]):
     """Thread-safe rate limiter with configurable requests per minute."""
     
     def __init__(self, requests_per_minute: int):
-        """
-        Initialize rate limiter.
-        
-        Args:
-            requests_per_minute: Maximum number of requests allowed per minute
-        """
         self.rate = requests_per_minute
         self.min_interval = 60.0 / requests_per_minute
         self.last_check = 0.0
         self._lock = Lock()
         self._last_reset = time.monotonic()
         self._num_calls = 0
-    
-    def __enter__(self):
-        """Rate limiting context entry"""
-        with self._lock:
-            now = time.monotonic()
 
-    @contextmanager 
-    def __call__(self):
-        """Context manager for rate limiting."""
+    def __enter__(self) -> None:
         with self._lock:
             now = time.monotonic()
             
@@ -51,8 +40,9 @@ class RateLimiter:
             
             self.last_check = time.monotonic()
             self._num_calls += 1
-            
-            try:
-                yield
-            finally:
-                pass
+
+    def __exit__(self,
+                 exc_type: Optional[Type[BaseException]],
+                 exc_val: Optional[BaseException],
+                 exc_tb: Optional[TracebackType]) -> Optional[bool]:
+        return None
