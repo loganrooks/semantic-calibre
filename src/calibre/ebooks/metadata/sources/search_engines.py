@@ -336,7 +336,7 @@ def google_parse_results(root, raw, log=prints, ignore_uncached=True):
             purl = urlparse(url)
         except Exception:
             continue
-        if purl.hostname.endswith('google.com'):
+        if purl.hostname == 'google.com' or purl.hostname.endswith('.google.com'):
             continue
         try:
             title = tostring(next(a.iterchildren('span')))
