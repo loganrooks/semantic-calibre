@@ -14,7 +14,12 @@
 /manual/.doctrees
 /build
 /dist
-/docs
+# Calibre generated docs
+/docs/*
+# But keep semantic-calibre documentation
+!/docs/ISSUES.md
+!/docs/CALIBRE_AI.md
+!/docs/decisions/
 /resources/localization
 /resources/hyphenation
 /resources/scripts.calibre_msgpack

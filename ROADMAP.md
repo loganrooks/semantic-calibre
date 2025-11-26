@@ -1,16 +1,27 @@
 # Semantic Calibre Roadmap
 
+> **Last Updated:** 2025-01-26
+> **Current Phase:** 1.5 - Embedding Profiles & Calibre AI Integration
+
 ## Vision
 
 Enable semantic (meaning-based) search across Calibre e-book libraries, allowing users to find books and passages by concept rather than exact keywords.
 
+**Key Design Principles:**
+- Integrate with Calibre's existing AI system (don't duplicate configuration)
+- On-demand indexing (respect user resources)
+- Embedding profiles (support multiple providers/models)
+- Minimal fork divergence (easy upstream sync)
+
+See [docs/ISSUES.md](docs/ISSUES.md) for design decisions.
+
 ---
 
-## Phase 1: Core Library
+## Phase 1: Core Library ✅
 
 **Goal:** Build the foundational `calibre_semantic` library with all core components.
 
-### Completed
+**Status:** Complete
 
 - [x] **Types & Protocols** (`core/types.py`)
   - BookIdentifier, TextChunk, EmbeddedChunk
@@ -39,24 +50,52 @@ Enable semantic (meaning-based) search across Calibre e-book libraries, allowing
   - Index management (add, remove, check)
   - Search with filters (book, library, score)
 
-### In Progress
-
-- [ ] **Book Content Extraction**
+- [x] **Book Content Extraction** (`extraction/`)
   - EPUB text extraction (parse spine, strip HTML)
-  - PDF text extraction (optional)
-  - Metadata extraction from Calibre DB
+  - Location metadata for navigation
 
-### Planned
-
-- [ ] **MCP Server** (`mcp/`)
+- [x] **MCP Server** (`mcp/`)
   - Expose search as MCP tools
   - Index management tools
-  - Configuration tools
+  - Configuration for Claude Desktop
 
-- [ ] **CLI Tool**
-  - `calibre-semantic index <library>`
-  - `calibre-semantic search <query>`
-  - `calibre-semantic status`
+---
+
+## Phase 1.5: Embedding Profiles & Calibre AI Integration 🚧
+
+**Goal:** Support multiple embedding providers with proper Calibre AI integration.
+
+**Status:** In Progress
+
+### Completed
+- [x] Design decisions documented (DD-001 through DD-005)
+- [x] Calibre AI integration guide written
+
+### In Progress
+- [ ] **Calibre AI Embedding Functions**
+  - Add `embed()` to `src/calibre/ai/google/backend.py`
+  - Add `embed()` to `src/calibre/ai/openai/backend.py`
+  - Support configurable dimensions (256, 768, 3072)
+
+- [ ] **Update CalibreAIAdapter**
+  - Use native Calibre AI embedding functions
+  - Proper fallback chain to sentence-transformers
+
+### Planned
+- [ ] **Embedding Profiles** (`core/profiles.py`)
+  - `EmbeddingProfile` dataclass (provider, model, dimension, index strategy)
+  - `BookIndexStatus` tracking (which books in which profiles)
+  - Profile manager with CRUD operations
+
+- [ ] **Database Schema Updates**
+  - `embedding_profiles` table
+  - `book_index_status` table
+  - Per-profile vector storage
+
+- [ ] **On-Demand Indexing**
+  - Remove auto-index default
+  - `index_book(book_id, profile_id)` method
+  - Index status checking
 
 ---
 
@@ -64,26 +103,32 @@ Enable semantic (meaning-based) search across Calibre e-book libraries, allowing
 
 **Goal:** Create an installable Calibre plugin for cross-library semantic search.
 
-### Planned
+**Status:** Planned
 
 - [ ] **Plugin Skeleton**
   - InterfaceActionBase implementation
   - Plugin metadata and packaging
 
+- [ ] **Embedding Library Manager UI**
+  - View/create/delete profiles
+  - See which books are indexed where
+  - Manage books in profiles
+
 - [ ] **Search Dialog UI**
   - Qt-based search interface
-  - Result display with book covers
+  - Profile selector
+  - Result display with book covers and similarity scores
   - Navigation to results in library view
 
-- [ ] **Background Indexer**
-  - Index books on library open
-  - Incremental indexing (new books only)
-  - Progress reporting
+- [ ] **Index Actions**
+  - Right-click "Add to Semantic Index"
+  - Bulk indexing with progress
+  - Optional dialog on book add
 
 - [ ] **Configuration Panel**
-  - Embedding model selection
-  - Vector store location
-  - Indexing preferences
+  - Profile management
+  - Default behaviors
+  - Storage location
 
 ---
 
@@ -91,27 +136,31 @@ Enable semantic (meaning-based) search across Calibre e-book libraries, allowing
 
 **Goal:** Add semantic search mode to Calibre's e-book viewer.
 
-### Planned
+**Status:** Planned
 
 - [ ] **Viewer Search Patch**
   - Add "Semantic" to search mode dropdown
+  - Profile selector (or use default)
   - Integrate with viewer's search infrastructure
 
-- [ ] **In-Book Indexing**
-  - Index current book on open
+- [ ] **On-Demand Book Indexing**
+  - Prompt to index if not already indexed
+  - Index current book with selected profile
   - Cache embeddings for reopened books
 
 - [ ] **Result Navigation**
   - Jump to semantic matches in book
   - Highlight relevant passages
+  - Show similarity scores in sidebar
 
 ---
 
 ## Phase 4: Advanced Features (Future)
 
-- [ ] **Multi-model Support**
-  - Compare results from different models
-  - Model performance benchmarking
+- [ ] **Index Strategies**
+  - HNSW for large collections (via FAISS backend)
+  - IVF for very large collections
+  - Quantization for memory-constrained systems
 
 - [ ] **Semantic Recommendations**
   - "Books similar to this"
@@ -120,6 +169,10 @@ Enable semantic (meaning-based) search across Calibre e-book libraries, allowing
 - [ ] **Cross-language Search**
   - Search in English, find results in other languages
   - Multi-lingual embedding models
+
+- [ ] **Cost Tracking**
+  - Show embedding costs before indexing
+  - Track cumulative API costs
 
 - [ ] **Cloud Sync**
   - Sync embeddings across devices
@@ -130,22 +183,32 @@ Enable semantic (meaning-based) search across Calibre e-book libraries, allowing
 ## Technical Debt & Maintenance
 
 ### Known Issues
-- SQLite-vec tests skipped (dependency not installed in CI)
-- SentenceTransformer tests skipped (heavy dependency)
+See [docs/ISSUES.md](docs/ISSUES.md) for full list.
+
+- **KI-001:** sqlite-vec tests skipped in CI
+- **KI-002:** SentenceTransformer tests require heavy dependencies
+- **KI-003:** CalibreAIAdapter falls back silently
 
 ### Maintenance Tasks
 - [ ] Set up CI/CD with GitHub Actions
 - [ ] Add type checking with mypy
 - [ ] Add code coverage reporting
 - [ ] Automate upstream sync checks
+- [ ] Weekly documentation review
 
 ---
 
 ## Contributing
 
-See CLAUDE.md for development conventions and FORK_MAINTENANCE.md for working with the Calibre fork.
+See [CLAUDE.md](CLAUDE.md) for development conventions and [FORK_MAINTENANCE.md](FORK_MAINTENANCE.md) for working with the Calibre fork.
 
-### Priority for Contributors
-1. Book content extraction (Phase 1 blocker)
-2. MCP server (enables AI integration)
-3. Plugin skeleton (enables user testing)
+### Current Priorities
+1. **Calibre AI embedding integration** (Phase 1.5 blocker)
+2. **Embedding profiles implementation** (enables multi-provider)
+3. **Plugin skeleton** (enables user testing)
+
+### Documentation
+- [docs/ISSUES.md](docs/ISSUES.md) - Design decisions and known issues
+- [docs/CALIBRE_AI.md](docs/CALIBRE_AI.md) - Calibre AI integration guide
+- [semantic-search/DESIGN.md](semantic-search/DESIGN.md) - Library design
+- [semantic-search/ARCHITECTURE.md](semantic-search/ARCHITECTURE.md) - Architecture details
