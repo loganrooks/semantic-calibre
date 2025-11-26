@@ -18,8 +18,11 @@ from calibre_semantic.core.types import (
     VectorStore,
     VectorStoreConfig,
 )
+from calibre_semantic.core.embeddings import create_embedding_provider
+from calibre_semantic.core.vectordb import create_vector_store
 
 __all__ = [
+    # Types
     "BookIdentifier",
     "BookMetadata",
     "ChunkLocation",
@@ -36,4 +39,7 @@ __all__ = [
     "Vector",
     "VectorStore",
     "VectorStoreConfig",
+    # Factories
+    "create_embedding_provider",
+    "create_vector_store",
 ]
