@@ -290,6 +290,43 @@ class TestIndexing:
         # Should have called remove_book
         assert mock_vector_store.remove_book.called
 
+    def test_index_epub_extracts_and_indexes_content(
+        self,
+        default_config: SemanticSearchConfig,
+        mock_embedding_provider,
+        mock_vector_store,
+        sample_book_id: BookIdentifier,
+    ) -> None:
+        """index_epub should extract text from EPUB and index it."""
+        from calibre_semantic.search import SemanticSearchEngine
+        from tests.test_epub_extraction import create_test_epub
+
+        # Create a test EPUB
+        content_files = {
+            'chapter1.xhtml': '''<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<body><h1>Chapter 1</h1><p>Machine learning content.</p></body>
+</html>''',
+            'chapter2.xhtml': '''<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<body><h1>Chapter 2</h1><p>Deep learning content.</p></body>
+</html>''',
+        }
+        epub_bytes = create_test_epub(content_files)
+
+        engine = SemanticSearchEngine(
+            config=default_config,
+            embedding_provider=mock_embedding_provider,
+            vector_store=mock_vector_store,
+        )
+
+        chunk_count = engine.index_epub(epub_bytes, sample_book_id)
+
+        # Should have indexed content from both chapters
+        assert chunk_count > 0
+        assert mock_embedding_provider.embed.called
+        assert mock_vector_store.add.called
+
 
 # =============================================================================
 # Search Tests

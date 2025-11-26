@@ -86,14 +86,14 @@ if TYPE_CHECKING:
 
 ## Current Status
 
-### Phase 1: Core Library (In Progress)
+### Phase 1: Core Library (Complete)
 - [x] Embedding provider abstraction
 - [x] Vector store abstraction (Memory, SQLite-vec)
 - [x] Chunking strategies (Semantic, Fixed)
 - [x] SemanticSearchEngine orchestration
 - [x] CalibreAIAdapter (Calibre AI integration)
-- [ ] Book content extraction (EPUB parsing)
-- [ ] MCP server
+- [x] Book content extraction (EPUB parsing)
+- [x] MCP server for AI assistant integration
 
 ### Phase 2: Calibre Plugin
 - [ ] Plugin skeleton
@@ -112,6 +112,8 @@ if TYPE_CHECKING:
 | `semantic-search/calibre_semantic/core/types.py` | Core types and protocols |
 | `semantic-search/calibre_semantic/core/chunking.py` | Text chunking strategies |
 | `semantic-search/calibre_semantic/search.py` | Main SemanticSearchEngine |
+| `semantic-search/calibre_semantic/extraction/epub.py` | EPUB text extraction |
+| `semantic-search/calibre_semantic/mcp/server.py` | MCP server for AI assistants |
 | `semantic-search/calibre_semantic/providers/embeddings/calibre_ai.py` | Calibre AI adapter |
 | `FORK_MAINTENANCE.md` | How to sync with upstream Calibre |
 
@@ -135,6 +137,26 @@ if TYPE_CHECKING:
 
 ## Testing Notes
 
-- 114 tests currently passing
+- 148 tests currently passing
 - 18 tests skipped (require optional dependencies)
 - Use `python -m pytest` (not bare `pytest`) to ensure imports work
+
+## MCP Server Usage
+
+Run the MCP server:
+```bash
+python -m calibre_semantic.mcp --index-path ./semantic_index.db
+```
+
+Or configure in Claude Desktop (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "calibre-semantic": {
+      "command": "python",
+      "args": ["-m", "calibre_semantic.mcp"],
+      "env": {"CALIBRE_SEMANTIC_INDEX": "/path/to/index.db"}
+    }
+  }
+}
+```

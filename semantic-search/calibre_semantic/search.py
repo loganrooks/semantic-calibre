@@ -231,6 +231,52 @@ class SemanticSearchEngine:
 
         return total_chunks
 
+    def index_epub(
+        self,
+        epub_path: str | bytes,
+        book_id: BookIdentifier,
+        force_reindex: bool = False,
+    ) -> int:
+        """Index an EPUB file.
+
+        Extracts text content from all spine items and indexes them.
+
+        Args:
+            epub_path: Path to EPUB file or EPUB bytes
+            book_id: The book identifier
+            force_reindex: If True, remove existing chunks first
+
+        Returns:
+            Total number of chunks indexed
+
+        Raises:
+            EPUBError: If the EPUB file is invalid
+        """
+        from calibre_semantic.extraction.epub import EPUBExtractor
+
+        if force_reindex:
+            self._vector_store.remove_book(book_id)
+
+        total_chunks = 0
+
+        with EPUBExtractor(epub_path) as extractor:
+            for item in extractor.iter_content():
+                if not item['text'].strip():
+                    continue
+
+                count = self.index_text(
+                    text=item['text'],
+                    book_id=book_id,
+                    spine_index=item['spine_index'],
+                    spine_name=item['spine_name'],
+                    chapter_title=item['chapter_title'],
+                    force_reindex=False,  # Already handled above
+                )
+                total_chunks += count
+
+        logger.info(f"Indexed {total_chunks} chunks from EPUB for book {book_id}")
+        return total_chunks
+
     # =========================================================================
     # Search Operations
     # =========================================================================
