@@ -20,6 +20,7 @@ from calibre_semantic.core.types import (
     SemanticSearchConfig,
     TextChunk,
 )
+from calibre_semantic.search import SemanticSearchEngine
 
 __all__ = [
     "__version__",
@@ -33,5 +34,6 @@ __all__ = [
     "SearchResult",
     "SearchResults",
     "SemanticSearchConfig",
+    "SemanticSearchEngine",
     "TextChunk",
 ]
