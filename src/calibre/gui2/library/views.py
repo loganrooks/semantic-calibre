@@ -43,6 +43,7 @@ from calibre import force_unicode
 from calibre.constants import filesystem_encoding, islinux
 from calibre.gui2 import BOOK_DETAILS_DISPLAY_DEBOUNCE_DELAY, FunctionDispatcher, error_dialog, gprefs, show_restart_warning
 from calibre.gui2.dialogs.enum_values_edit import EnumValuesEdit
+from calibre.gui2.dialogs.template_dialog import TemplateDialog
 from calibre.gui2.gestures import GestureManager
 from calibre.gui2.library import DEFAULT_SORT
 from calibre.gui2.library.alternate_views import AlternateViews, setup_dnd_interface
@@ -52,7 +53,6 @@ from calibre.gui2.pin_columns import PinTableView, TableView
 from calibre.gui2.preferences.create_custom_column import CreateNewCustomColumn
 from calibre.utils.config import prefs, tweaks
 from calibre.utils.icu import primary_sort_key
-from polyglot.builtins import iteritems
 
 
 def max_permitted_column_width(self, col):
@@ -191,7 +191,7 @@ class PreserveViewState:  # {{{
             self.hscroll = view.horizontalScrollBar().value()
             ci = self.view.currentIndex()
             self.row, self.col = ci.row(), ci.column()
-        except:
+        except Exception:
             import traceback
             traceback.print_exc()
 
@@ -227,7 +227,7 @@ class PreserveViewState:  # {{{
 
     @state.setter
     def state(self, state):
-        for k, v in iteritems(state):
+        for k, v in state.items():
             setattr(self, k, v)
         self.__exit__()
 
@@ -311,7 +311,7 @@ class AdjustColumnSize(QDialog):  # {{{
     def resize_to_fit_button_clicked(self):
         self.view.resizeColumnToContents(self.column)
         w = self.view.horizontalHeader().sectionSize(self.column)
-        w = w if w <= self.maximum_size else self.maximum_size
+        w = min(w, self.maximum_size)
         self.spin_box.setValue(w)
 
     def set_maximum_button_clicked(self):
@@ -501,7 +501,7 @@ class BooksView(TableView):  # {{{
             return
         try:
             idx = self.column_map.index(column)
-        except:
+        except Exception:
             return
         h = view.column_header
 
@@ -562,6 +562,23 @@ class BooksView(TableView):  # {{{
             self.resizeColumnToContents(idx)
         elif action == 'edit_enum':
             EnumValuesEdit(self, self._model.db, column).exec()
+        elif action == 'tt_template':
+            db = self._model.db
+            rows = self.selectionModel().selectedRows()
+            mi = []
+            tt_dict = db.new_api.pref('column_tooltip_templates', {})
+            for i in range(min(len(rows), 10)):
+                mi.append(db.new_api.get_proxy_metadata(db.data.index_to_id(i)))
+            template = tt_dict.get(column, '')
+            text_is_placeholder = False
+            if not template:
+                text_is_placeholder = True
+                from calibre.gui2.actions.column_tooltips import column_template_placeholder_text
+                template = column_template_placeholder_text()
+            d = TemplateDialog(self, template, mi=mi, text_is_placeholder=text_is_placeholder)
+            if d.exec():
+                tt_dict[column] = d.rule[1]
+                db.new_api.set_pref('column_tooltip_templates', tt_dict)
         self.save_state()
 
     def create_context_menu(self, col, name, view):
@@ -611,16 +628,23 @@ class BooksView(TableView):  # {{{
                                     partial(handler, action='editcustcol'))
                 if col_manager.must_restart():
                     act.setEnabled(False)
+            db = self._model.db.new_api
+            tt_prefs = db.pref('column_tooltip_templates', {})
+            ans.addAction(QIcon.ic('edit_input.png'),
+                          (_('Define tooltip template for "%s"') if col not in tt_prefs
+                            else _('Edit tooltip template for "%s"')) % name,
+                          partial(handler, action='tt_template', ))
         if self.is_library_view:
+            if self._model.db.field_metadata[col]['datatype'] == 'enumeration':
+                ans.addAction(QIcon.ic('edit_input.png'), _('Edit permissible values for %s') % name,
+                              partial(handler, action='edit_enum'))
             if self._model.db.field_metadata[col]['is_category']:
+                ans.addSeparator()
                 act = ans.addAction(QIcon.ic('quickview.png'), _('Quickview column %s') % name,
                                     partial(handler, action='quickview'))
                 rows = self.selectionModel().selectedRows()
                 if len(rows) > 1:
                     act.setEnabled(False)
-            if self._model.db.field_metadata[col]['datatype'] == 'enumeration':
-                ans.addAction(QIcon.ic('edit_input.png'), _('Edit permissible values for %s') % name,
-                              partial(handler, action='edit_enum'))
 
         hidden_cols = {self.column_map[i]: i for i in range(view.column_header.count())
                        if view.column_header.isSectionHidden(i) and self.column_map[i] not in ('ondevice', 'inlibrary')}
@@ -632,7 +656,7 @@ class BooksView(TableView):  # {{{
             m = ans.addMenu(_('Show column'))
             m.setIcon(QIcon.ic('plus.png'))
             hcols = [(hcol, str(self.model().headerData(hidx, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) or ''))
-                     for hcol, hidx in iteritems(hidden_cols)]
+                     for hcol, hidx in hidden_cols.items()]
             hcols.sort(key=lambda x: primary_sort_key(x[1]))
             for hcol, hname in hcols:
                 m.addAction(hname.replace('&', '&&'), partial(handler, action='show', column=hcol))
@@ -939,7 +963,7 @@ class BooksView(TableView):  # {{{
         sizes = state.get('column_sizes', {})
         for col, size in sizes.items():
             if col in cmap:
-                sz = sizes[col]
+                sz = size
                 if sz < 3:
                     sz = h.sectionSizeHint(cmap[col])
                 h.resizeSection(cmap[col], sz)
@@ -993,7 +1017,7 @@ class BooksView(TableView):  # {{{
                     ans = gprefs.get(name, None)
                     try:
                         del gprefs[name]
-                    except:
+                    except Exception:
                         pass
                     if ans is not None:
                         db.new_api.set_pref(name, ans)
@@ -1023,7 +1047,7 @@ class BooksView(TableView):  # {{{
                     if not isinstance(d, bool):
                         d = True if d == 0 else False
                     sh.append((c, d))
-            except:
+            except Exception:
                 # Ignore invalid tweak values as users seem to often get them
                 # wrong
                 print('Ignoring invalid sort_columns_at_startup tweak, with error:')
@@ -1473,7 +1497,7 @@ class BooksView(TableView):  # {{{
     def current_id(self):
         try:
             return self.model().id(self.currentIndex())
-        except:
+        except Exception:
             pass
         return None
 
@@ -1513,7 +1537,7 @@ class BooksView(TableView):  # {{{
                 continue
             try:
                 return self.model().id(self.model().index(i, column))
-            except:
+            except Exception:
                 pass
 
         # No unselected rows after the current row, look before
@@ -1522,7 +1546,7 @@ class BooksView(TableView):  # {{{
                 continue
             try:
                 return self.model().id(self.model().index(i, column))
-            except:
+            except Exception:
                 pass
         return None
 

@@ -10,6 +10,7 @@ import re
 import struct
 from collections import namedtuple
 from itertools import repeat
+from urllib.parse import urldefrag
 from uuid import uuid4
 
 from lxml import etree
@@ -25,7 +26,6 @@ from calibre.ebooks.mobi.utils import read_font_record
 from calibre.ebooks.oeb.base import XHTML, XPath, xml2text
 from calibre.ebooks.oeb.parse_utils import parse_html
 from polyglot.builtins import as_unicode
-from polyglot.urllib import urldefrag
 
 Part = namedtuple('Part',
     'num type filename start end aid')
@@ -274,20 +274,19 @@ class Mobi8Reader:
                     format = 'file'
                     dir = 'images'
                     fname = 'svgimg' + nstr + '.svg'
+            # search for CDATA and if exists inline it
+            elif flowpart.find(b'[CDATA[') >= 0:
+                typ = 'css'
+                flowpart = b'<style type="text/css">\n' + flowpart + b'\n</style>\n'
+                format = 'inline'
+                dir = None
+                fname = None
             else:
-                # search for CDATA and if exists inline it
-                if flowpart.find(b'[CDATA[') >= 0:
-                    typ = 'css'
-                    flowpart = b'<style type="text/css">\n' + flowpart + b'\n</style>\n'
-                    format = 'inline'
-                    dir = None
-                    fname = None
-                else:
-                    # css - assume as standalone css file
-                    typ = 'css'
-                    format = 'file'
-                    dir = 'styles'
-                    fname = nstr + '.css'
+                # css - assume as standalone css file
+                typ = 'css'
+                format = 'file'
+                dir = 'styles'
+                fname = nstr + '.css'
 
             self.flows[j] = flowpart
             self.flowinfo.append(FlowInfo(typ, format, dir, fname))
@@ -482,7 +481,7 @@ class Mobi8Reader:
                     if os.path.exists(href.replace('/', os.sep)):
                         try:
                             toc = self.read_inline_toc(href, frag)
-                        except:
+                        except Exception:
                             self.log.exception('Failed to read inline ToC')
 
         opf = OPFCreator(os.getcwd(), mi)
@@ -502,7 +501,7 @@ class Mobi8Reader:
         if self.for_tweak:
             try:
                 os.remove('debug-raw.html')
-            except:
+            except Exception:
                 pass
 
         opf.create_manifest_from_files_in([os.getcwd()], exclude=exclude)

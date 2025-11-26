@@ -60,6 +60,8 @@ class Node:
     NODE_SWITCH = 31
     NODE_SWITCH_IF = 32
     NODE_LIST_COUNT_FIELD = 33
+    NODE_WITH = 34
+    NODE_FSTRING = 35
 
     def __init__(self, line_number, name):
         self.my_line_number = line_number
@@ -72,6 +74,14 @@ class Node:
     @property
     def line_number(self):
         return self.my_line_number
+
+
+class WithNode(Node):
+    def __init__(self, line_number, book_id, block):
+        Node.__init__(self, line_number, 'with ...')
+        self.node_type = self.NODE_WITH
+        self.book_id = book_id
+        self.block = block
 
 
 class IfNode(Node):
@@ -339,6 +349,13 @@ class ListCountFieldNode(Node):
         self.expression = expression
 
 
+class FStringNode(Node):
+    def __init__(self, line_number, string):
+        Node.__init__(self, line_number, 'f_string')
+        self.node_type = self.NODE_FSTRING
+        self.string = string
+
+
 class _Parser:
     LEX_OP = 1
     LEX_ID = 2
@@ -378,7 +395,7 @@ class _Parser:
             token = self.prog[self.lex_pos][1]
             self.lex_pos += 1
             return token
-        except:
+        except Exception:
             return None
 
     def consume(self):
@@ -389,21 +406,21 @@ class _Parser:
         try:
             token = self.prog[self.lex_pos]
             return token[1] == op and token[0] == self.LEX_OP
-        except:
+        except Exception:
             return False
 
     def token_op_is_string_infix_compare(self):
         self.check_eol()
         try:
             return self.prog[self.lex_pos][0] == self.LEX_STRING_INFIX
-        except:
+        except Exception:
             return False
 
     def token_op_is_numeric_infix_compare(self):
         self.check_eol()
         try:
             return self.prog[self.lex_pos][0] == self.LEX_NUMERIC_INFIX
-        except:
+        except Exception:
             return False
 
     def token_is_newline(self):
@@ -413,7 +430,7 @@ class _Parser:
         self.check_eol()
         try:
             return self.prog[self.lex_pos][0] == self.LEX_ID
-        except:
+        except Exception:
             return False
 
     def token_is(self, candidate):
@@ -421,38 +438,38 @@ class _Parser:
         try:
             token = self.prog[self.lex_pos]
             return token[1] == candidate and token[0] == self.LEX_KEYWORD
-        except:
+        except Exception:
             return False
 
     def token_is_keyword(self):
         self.check_eol()
         try:
             return self.prog[self.lex_pos][0] == self.LEX_KEYWORD
-        except:
+        except Exception:
             return False
 
     def token_is_constant(self):
         self.check_eol()
         try:
             return self.prog[self.lex_pos][0] == self.LEX_CONST
-        except:
+        except Exception:
             return False
 
     def token_is_eof(self):
         self.check_eol()
         try:
             return self.prog[self.lex_pos][0] == self.LEX_EOF
-        except:
+        except Exception:
             return True
 
     def token_text(self):
         self.check_eol()
         try:
             return self.prog[self.lex_pos][1]
-        except:
+        except Exception:
             return _("'End of program'")
 
-    def program(self, parent, funcs, prog):
+    def program(self, parent, funcs, prog, local_functions=None):
         self.line_number = 1
         self.lex_pos = 0
         self.parent = parent
@@ -460,7 +477,7 @@ class _Parser:
         self.func_names = frozenset(set(self.funcs.keys()))
         self.prog = prog[0]
         self.prog_len = len(self.prog)
-        self.local_functions = set()
+        self.local_functions = local_functions if local_functions is not None else set()
         if prog[1] != '':
             self.error(_("Failed to scan program. Invalid input '{0}'").format(prog[1]))
         tree = self.expression_list()
@@ -600,6 +617,20 @@ class _Parser:
     def local_call_expression(self, name, arguments):
         return LocalFunctionCallNode(self.line_number, name, arguments)
 
+    def with_expression(self):
+        self.consume()
+        line_number = self.line_number
+        book_id = self.top_expr()
+        if not self.token_op_is(':'):
+            self.error(_("{0} statement: expected '{1}', "
+                         "found '{2}'").format('with', ':', self.token_text()))
+        self.consume()
+        block = self.expression_list()
+        if not self.token_is('htiw'):
+            self.error(_("'{0}' statement: missing the closing '{1}'").format('def', 'fed'))
+        self.consume()
+        return WithNode(line_number, book_id, block)
+
     def call_expression(self, name, arguments):
         compiled_func = self.funcs[name].cached_compiled_text
         if compiled_func is None:
@@ -692,6 +723,7 @@ class _Parser:
             'continue': (lambda self: self.consume(), lambda self: ContinueNode(self.line_number)),
             'return':   (lambda self: self.consume(), lambda self: ReturnNode(self.line_number, self.top_expr())),
             'def':      (lambda self: None, define_function_expression),
+            'with':     (lambda self: None, with_expression)
     }
 
     # {inlined_function_name: tuple(constraint on number of length, node builder) }
@@ -719,7 +751,9 @@ class _Parser:
         'strcat':           (lambda _: True,
                              lambda ln, args: StrcatNode(ln, args)),
         'list_count_field': (lambda args: len(args) == 1,
-                             lambda ln, args: ListCountFieldNode(ln, args[0]))
+                             lambda ln, args: ListCountFieldNode(ln, args[0])),
+        'f_string':         (lambda args: len(args) == 1,
+                             lambda ln, args: FStringNode(ln, args[0])),
     }
 
     def expr(self):
@@ -786,7 +820,7 @@ class _Parser:
             if function_tuple and function_tuple[0](arguments):
                 return function_tuple[1](line_number, arguments)
             # More complicated special cases
-            if id_ == 'arguments' or id_ == 'globals' or id_ == 'set_globals':
+            if id_ in {'arguments', 'globals', 'set_globals'}:
                 new_args = []
                 for arg_list in arguments:
                     arg = arg_list[0]
@@ -1017,6 +1051,27 @@ class _Interpreter:
             raise e
         return val
 
+    def do_node_with(self, prog):
+        line_number = prog.line_number
+        parent_book = self.parent_book
+        v = None
+        try:
+            book_id = int(self.expr(prog.book_id))
+            if self.break_reporter:
+                self.break_reporter("'with': book id ", str(book_id), line_number)
+            self.parent_book = self.parent.book = get_database(
+                    self.parent_book, 'with statement').new_api.get_proxy_metadata(book_id)
+            v = self.expression_list(prog.block)
+            if self.break_reporter:
+                self.break_reporter("'with': block value", v, line_number)
+            return v
+        except (StopException, ValueError, ReturnExecuted) as e:
+            raise e
+        except Exception as e:
+            self.error(_("Unhandled exception '{0}'").format(e), line_number)
+        finally:
+            self.parent_book = self.parent.book = parent_book
+
     def do_node_if(self, prog):
         line_number = prog.line_number
         test_part = self.expr(prog.condition)
@@ -1124,7 +1179,7 @@ class _Interpreter:
             if (self.break_reporter):
                 self.break_reporter(prog.node_name, self.locals[prog.name], prog.line_number)
             return self.locals[prog.name]
-        except:
+        except Exception:
             self.error(_("Unknown identifier '{0}'").format(prog.name), prog.line_number)
 
     def do_node_func(self, prog):
@@ -1256,11 +1311,11 @@ class _Interpreter:
                 return res
             except StopException:
                 raise
-            except:
+            except Exception:
                 self.error(_("Unknown field '{0}'").format(name), prog.line_number)
         except (StopException, ValueError):
             raise
-        except:
+        except Exception:
             self.error(_("Unknown field '{0}'").format('internal parse error'),
                        prog.line_number)
 
@@ -1290,7 +1345,7 @@ class _Interpreter:
             return res
         except (StopException, ValueError) as e:
             raise e
-        except:
+        except Exception:
             self.error(_("Unknown field '{0}'").format('internal parse error'),
                        prog.line_number)
 
@@ -1346,6 +1401,14 @@ class _Interpreter:
         if self.break_reporter:
             self.break_reporter(prog.node_name, res, prog.line_number)
         return res
+
+    def do_node_f_string(self, prog):
+        def repl(mo):
+            p = self.parent.gpm_parser.program(self.parent, self.funcs,
+                                               self.parent.lex_scanner.scan(mo.group()[1:-1]),
+                                               local_functions=self.local_functions)
+            return self.expr(p)
+        return str(re.sub(r'\{.*?\}', repl, self.expr(prog.string)))
 
     def do_node_list_count_field(self, prog):
         name = field_metadata.search_term_to_field_key(self.expr(prog.expression))
@@ -1429,7 +1492,7 @@ class _Interpreter:
             return res
         except (StopException, ValueError) as e:
             raise e
-        except:
+        except Exception:
             self.error(_("Error during string comparison: "
                          "operator '{0}'").format(prog.operator), prog.line_number)
 
@@ -1457,7 +1520,7 @@ class _Interpreter:
             return res
         except (StopException, ValueError) as e:
             raise e
-        except:
+        except Exception:
             self.error(_("Value used in comparison is not a number: "
                          "operator '{0}'").format(prog.operator), prog.line_number)
 
@@ -1474,7 +1537,7 @@ class _Interpreter:
             return res
         except (StopException, ValueError) as e:
             raise e
-        except:
+        except Exception:
             self.error(_("Error during operator evaluation: "
                          "operator '{0}'").format(prog.operator), prog.line_number)
 
@@ -1491,7 +1554,7 @@ class _Interpreter:
             return res
         except (StopException, ValueError) as e:
             raise e
-        except:
+        except Exception:
             self.error(_("Error during operator evaluation: "
                          "operator '{0}'").format(prog.operator), prog.line_number)
 
@@ -1513,7 +1576,7 @@ class _Interpreter:
             return res
         except (StopException, ValueError) as e:
             raise e
-        except:
+        except Exception:
             self.error(_("Error during operator evaluation: "
                          "operator '{0}'").format(prog.operator), prog.line_number)
 
@@ -1531,7 +1594,7 @@ class _Interpreter:
             return res
         except (StopException, ValueError) as e:
             raise e
-        except:
+        except Exception:
             self.error(_("Error during operator evaluation: "
                          "operator '{0}'").format(prog.operator), prog.line_number)
 
@@ -1543,7 +1606,7 @@ class _Interpreter:
             return res
         except (StopException, ValueError) as e:
             raise e
-        except:
+        except Exception:
             self.error(_("Error during operator evaluation: "
                          "operator '{0}'").format(prog.operator), prog.line_number)
 
@@ -1608,7 +1671,9 @@ class _Interpreter:
         Node.NODE_LOCAL_FUNCTION_DEFINE: do_node_local_function_define,
         Node.NODE_LOCAL_FUNCTION_CALL:   do_node_local_function_call,
         Node.NODE_LIST_COUNT_FIELD:      do_node_list_count_field,
-        }
+        Node.NODE_WITH:                  do_node_with,
+        Node.NODE_FSTRING:               do_node_f_string,
+    }
 
     def expr(self, prog):
         try:
@@ -1670,7 +1735,7 @@ class TemplateFormatter(string.Formatter):
         elif 'eEfFgGn%'.find(typ) >= 0:
             try:
                 val = float(val)
-            except:
+            except Exception:
                 raise ValueError(
                     _('format: type {0} requires a decimal (float) value, got {1}').format(typ, val))
         return str(('{0:'+fmt+'}').format(val))
@@ -1681,7 +1746,7 @@ class TemplateFormatter(string.Formatter):
             if matches is None or matches.lastindex != 3:
                 return fmt, '', ''
             return matches.groups()
-        except:
+        except Exception:
             if DEBUG:
                 traceback.print_exc()
             return fmt, '', ''
@@ -1707,6 +1772,7 @@ class TemplateFormatter(string.Formatter):
             (r'(def|fed|continue)\b',    lambda x,t: (_Parser.LEX_KEYWORD, t)),
             (r'(return|inlist|break)\b', lambda x,t: (_Parser.LEX_KEYWORD, t)),
             (r'(inlist_field)\b',        lambda x,t: (_Parser.LEX_KEYWORD, t)),
+            (r'(with|htiw)\b',           lambda x,t: (_Parser.LEX_KEYWORD, t)),
             (r'(\|\||&&|!|{|})',         lambda x,t: (_Parser.LEX_OP, t)),
             (r'[(),=;:\+\-*/&]',         lambda x,t: (_Parser.LEX_OP, t)),
             (r'-?[\d\.]+',               lambda x,t: (_Parser.LEX_CONST, t)),
@@ -1715,7 +1781,7 @@ class TemplateFormatter(string.Formatter):
             (r'\w+',                     lambda x,t: (_Parser.LEX_ID, t)),
             (r'".*?((?<!\\)")',          lambda x,t: (_Parser.LEX_CONST, t[1:-1])),
             (r'\'.*?((?<!\\)\')',        lambda x,t: (_Parser.LEX_CONST, t[1:-1])),
-            (r'\n#.*?(?:(?=\n)|$)',      lambda x,t: _Parser.LEX_NEWLINE),
+            (r'\n[ \t]*#.*?(?:(?=\n)|$)',lambda x,t: _Parser.LEX_NEWLINE),
             (r'\s',                      lambda x,t: _Parser.LEX_NEWLINE if t == '\n' else None),
         ], flags=re.DOTALL)
 
@@ -2025,17 +2091,22 @@ class TemplateFormatter(string.Formatter):
             self.restore_state(state)
 
 
-class ValidateFormatter(TemplateFormatter):
+class ValidateFormatter:
     '''
-    Provides a formatter that substitutes the validation string for every value
+    Provides a formatter that uses a fake book. This class must be used only
+    in the GUI thread.
+
+    It is a class instead of a function for compatibility reasons.
     '''
 
-    def get_value(self, key, args, kwargs):
-        return self._validation_string
+    def validate(self, template):
+        from calibre.gui2 import is_gui_thread
+        if not is_gui_thread():
+            raise ValueError('A ValidateFormatter must only be used in the GUI thread')
 
-    def validate(self, x):
-        from calibre.ebooks.metadata.book.base import Metadata
-        return self.unsafe_format(x, {}, 'VALIDATE ERROR', Metadata(''))
+        from calibre.ebooks.metadata.book.base import get_model_metadata_instance
+        from calibre.ebooks.metadata.book.formatter import SafeFormat
+        return SafeFormat().unsafe_format(template, {}, get_model_metadata_instance())
 
 
 validation_formatter = ValidateFormatter()

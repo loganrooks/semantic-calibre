@@ -16,7 +16,6 @@ from calibre import force_unicode, replace_entities, strftime
 from calibre.utils.cleantext import clean_ascii_chars, clean_xml_chars
 from calibre.utils.date import dt_factory, local_tz, utcnow
 from calibre.utils.logging import default_log
-from polyglot.builtins import string_or_bytes
 
 
 class Article:
@@ -25,7 +24,7 @@ class Article:
         from lxml import html
         self.downloaded = False
         self.id = id
-        if not title or not isinstance(title, string_or_bytes):
+        if not title or not isinstance(title, (str, bytes)):
             title = _('Unknown')
         title = force_unicode(title, 'utf-8')
         self._title = clean_xml_chars(title).strip()
@@ -48,7 +47,7 @@ class Article:
             try:
                 s = html.fragment_fromstring(summary, create_parent=True)
                 summary = html.tostring(s, method='text', encoding='unicode')
-            except:
+            except Exception:
                 print('Failed to process article summary, deleting:')
                 print(summary.encode('utf-8'))
                 traceback.print_exc()
@@ -210,7 +209,7 @@ class Feed:
             title = re.sub(r'<.+?>', '', title)
         try:
             link  = self.get_article_url(item)
-        except:
+        except Exception:
             self.logger.warning(f'Failed to get link for {title}')
             self.logger.debug(traceback.format_exc())
             link = None

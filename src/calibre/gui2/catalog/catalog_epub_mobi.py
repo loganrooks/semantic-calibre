@@ -229,7 +229,7 @@ class PluginWidget(QWidget, Ui_Form):
 
         try:
             pattern = re.compile(regex)
-        except:
+        except Exception:
             results = _('regex error: %s') % sys.exc_info()[1]
         else:
             excluded_tags = []
@@ -545,7 +545,7 @@ class PluginWidget(QWidget, Ui_Form):
         # Append the output profile
         try:
             opts_dict['output_profile'] = [load_defaults('page_setup')['output_profile']]
-        except:
+        except Exception:
             opts_dict['output_profile'] = ['default']
 
         if False and self.DEBUG:
@@ -732,7 +732,7 @@ class PluginWidget(QWidget, Ui_Form):
         names.extend(self.preset_field_values)
         try:
             dex = names.index(self.preset_search_name)
-        except:
+        except Exception:
             dex = 0
         name = ''
         while not name:
@@ -806,7 +806,7 @@ class PluginWidget(QWidget, Ui_Form):
         # Append the current output profile
         try:
             preset['output_profile'] = load_defaults('page_setup')['output_profile']
-        except:
+        except Exception:
             preset['output_profile'] = 'default'
 
         self.presets[name] = preset
@@ -859,11 +859,10 @@ class CheckableTableWidgetItem(QTableWidgetItem):
             self.setFlags(self.flags() | Qt.ItemFlag.ItemIsTristate)
         if checked:
             self.setCheckState(Qt.CheckState.Checked)
+        elif is_tristate and checked is None:
+            self.setCheckState(Qt.CheckState.PartiallyChecked)
         else:
-            if is_tristate and checked is None:
-                self.setCheckState(Qt.CheckState.PartiallyChecked)
-            else:
-                self.setCheckState(Qt.CheckState.Unchecked)
+            self.setCheckState(Qt.CheckState.Unchecked)
 
     def get_boolean_value(self):
         '''
@@ -1162,17 +1161,16 @@ class GenericRulesTable(QTableWidget):
             values = []
         elif source_field == _('Tags'):
             values = sorted(self.db.all_tags(), key=sort_key)
-        else:
-            if self.eligible_custom_fields[str(source_field)]['datatype'] in ['enumeration', 'text']:
-                values = self.db.all_custom(self.db.field_metadata.key_to_label(
-                                            self.eligible_custom_fields[str(source_field)]['field']))
-                values = sorted(values, key=sort_key)
-            elif self.eligible_custom_fields[str(source_field)]['datatype'] in ['bool']:
-                values = [_('True'),_('False'),_('unspecified')]
-            elif self.eligible_custom_fields[str(source_field)]['datatype'] in ['composite']:
-                values = [_('any value'),_('unspecified')]
-            elif self.eligible_custom_fields[str(source_field)]['datatype'] in ['datetime']:
-                values = [_('any date'),_('unspecified')]
+        elif self.eligible_custom_fields[str(source_field)]['datatype'] in ['enumeration', 'text']:
+            values = self.db.all_custom(self.db.field_metadata.key_to_label(
+                                        self.eligible_custom_fields[str(source_field)]['field']))
+            values = sorted(values, key=sort_key)
+        elif self.eligible_custom_fields[str(source_field)]['datatype'] in ['bool']:
+            values = [_('True'),_('False'),_('unspecified')]
+        elif self.eligible_custom_fields[str(source_field)]['datatype'] in ['composite']:
+            values = [_('any value'),_('unspecified')]
+        elif self.eligible_custom_fields[str(source_field)]['datatype'] in ['datetime']:
+            values = [_('any date'),_('unspecified')]
 
         values_combo = ComboBox(self, values, pattern)
         values_combo.currentIndexChanged.connect(partial(self.values_index_changed, values_combo))

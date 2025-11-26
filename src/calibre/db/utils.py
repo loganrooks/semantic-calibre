@@ -17,8 +17,7 @@ from threading import Lock
 from calibre import as_unicode, prints
 from calibre.constants import cache_dir, get_windows_number_formats, iswindows, preferred_encoding
 from calibre.utils.icu import lower as icu_lower
-from calibre.utils.localization import canonicalize_lang
-from polyglot.builtins import iteritems, itervalues, string_or_bytes
+from calibre.utils.localization import canonicalize_lang, ngettext
 
 
 def force_to_bool(val):
@@ -35,7 +34,7 @@ def force_to_bool(val):
                 val = False
             else:
                 val = bool(int(val))
-        except:
+        except Exception:
             val = None
     return val
 
@@ -48,7 +47,7 @@ def fuzzy_title_patterns():
     if _fuzzy_title_patterns is None:
         from calibre.ebooks.metadata import get_title_sort_pat
         _fuzzy_title_patterns = tuple((re.compile(pat, re.IGNORECASE) if
-            isinstance(pat, string_or_bytes) else pat, repl) for pat, repl in
+            isinstance(pat, (str, bytes)) else pat, repl) for pat, repl in
                 [
                     (r'[\[\](){}<>\'";,:#]', ''),
                     (get_title_sort_pat(), ''),
@@ -231,7 +230,7 @@ class ThumbnailCache:
     def _invalidate_sizes(self):
         if self.size_changed:
             size = self.thumbnail_size
-            remove = tuple(key for key, entry in iteritems(self.items) if size != entry.thumbnail_size)
+            remove = tuple(key for key, entry in self.items.items() if size != entry.thumbnail_size)
             for key in remove:
                 self._remove(key)
             self.size_changed = False
@@ -390,7 +389,7 @@ class ThumbnailCache:
                 pass
             if not hasattr(self, 'total_size'):
                 self._load_index()
-            for entry in itervalues(self.items):
+            for entry in self.items.values():
                 self._do_delete(entry.path)
             self.total_size = 0
             self.items = OrderedDict()
@@ -460,19 +459,19 @@ def human_readable_interval(secs):
     seconds = secs % 60
     parts = []
     if days > 0:
-        parts.append(_('{} days').format(days))
+        parts.append(ngettext('1 day', '{} days', days).format(days))
         if hours > 0:
-            parts.append(_('{} hours').format(hours))
+            parts.append(ngettext('1 hour', '{} hours', hours).format(hours))
     elif hours > 0:
-        parts.append(_('{} hours').format(hours))
+        parts.append(ngettext('1 hour', '{} hours', hours).format(hours))
         if minutes > 0:
-            parts.append(_('{} minutes').format(minutes))
+            parts.append(ngettext('1 minute', '{} minutes', minutes).format(minutes))
     elif minutes > 0:
-        parts.append(_('{} minutes').format(minutes))
+        parts.append(ngettext('1 minute', '{} minutes', minutes).format(minutes))
         if secs > 0:
-            parts.append(_('{} seconds').format(seconds))
+            parts.append(ngettext('1 second', '{} seconds', seconds).format(seconds))
     elif secs > 0:
-        parts.append(_('{} seconds').format(seconds))
+        parts.append(ngettext('1 second', '{} seconds', seconds).format(seconds))
     return ' '.join(parts)
 
 

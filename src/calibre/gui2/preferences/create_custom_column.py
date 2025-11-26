@@ -36,7 +36,6 @@ from calibre.gui2.dialogs.template_dialog import TemplateDialog
 from calibre.gui2.dialogs.template_line_editor import TemplateLineEditor
 from calibre.utils.date import UNDEFINED_DATE, parse_date
 from calibre.utils.localization import ngettext
-from polyglot.builtins import iteritems
 
 
 class CreateCustomColumn(QDialog):
@@ -106,7 +105,7 @@ class CreateCustomColumn(QDialog):
             'is_multiple':True
         },
     )))
-    column_types_map = {k['datatype']:idx for idx, k in iteritems(column_types)}
+    column_types_map = {k['datatype']:idx for idx, k in column_types.items()}
 
     def __init__(self, gui, caller, current_key, standard_colheads, freeze_lookup_name=False):
         QDialog.__init__(self, gui)
@@ -613,7 +612,7 @@ class CreateCustomColumn(QDialog):
     def datatype_changed(self, *args):
         try:
             col_type = self.column_types[self.column_type_box.currentIndex()]['datatype']
-        except:
+        except Exception:
             col_type = None
         needs_format = col_type in ('datetime', 'int', 'float')
         for x in ('box', 'default_label', 'label'):
@@ -707,8 +706,7 @@ class CreateCustomColumn(QDialog):
         col = str(self.column_name_box.text()).strip()
         if not col:
             return self.simple_error('', _('No lookup name was provided'))
-        if col.startswith('#'):
-            col = col[1:]
+        col = col.removeprefix('#')
         if re.match(r'^\w*$', col) is None or not col[0].isalpha() or col.lower() != col:
             return self.simple_error('', _('The lookup name must contain only '
                     'lower case letters, digits and underscores, and start with a letter'))
@@ -758,7 +756,7 @@ class CreateCustomColumn(QDialog):
                 else:
                     try:
                         tv = parse_date(default_val)
-                    except:
+                    except Exception:
                         tv = UNDEFINED_DATE
                     if tv == UNDEFINED_DATE:
                         return self.simple_error(_('Invalid default value'),
@@ -829,7 +827,7 @@ class CreateCustomColumn(QDialog):
                         msg = _('The default value must be a real number')
                         tv = float(default_val)
                         display_dict['default_value'] = tv
-                except:
+                except Exception:
                     return self.simple_error(_('Invalid default value'), msg)
         elif col_type == 'comments':
             display_dict['heading_position'] = str(self.comments_heading_position.currentData())
@@ -840,7 +838,7 @@ class CreateCustomColumn(QDialog):
             if default_val:
                 try:
                     tv = int((float(default_val) if half_stars else int(default_val)) * 2)
-                except:
+                except Exception:
                     tv = -1
                 if tv < 0 or tv > 10:
                     if half_stars:

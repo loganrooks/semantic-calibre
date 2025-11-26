@@ -8,6 +8,7 @@ import errno
 import os
 import shutil
 import stat
+from queue import Empty, LifoQueue
 from threading import Thread
 
 from qt.core import QHBoxLayout, QLabel, QObject, QSize, Qt, QWidget, pyqtSignal
@@ -17,7 +18,6 @@ from calibre.gui2.progress_indicator import ProgressIndicator
 from calibre.ptempfile import PersistentTemporaryFile
 from calibre.utils import join_with_timeout
 from calibre.utils.filenames import atomic_rename, format_permissions
-from polyglot.queue import Empty, LifoQueue
 
 
 def save_dir_container(container, path):
@@ -157,7 +157,7 @@ class SaveManager(QObject):
             try:
                 count, tdir, container = x
                 error_occurred = self.process_save(count, tdir, container)
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
             finally:
@@ -193,7 +193,7 @@ class SaveManager(QObject):
         error_occurred = False
         try:
             self.do_save(tdir, container)
-        except:
+        except Exception:
             import traceback
             self.report_error.emit(traceback.format_exc())
             error_occurred = True

@@ -370,7 +370,7 @@ class TagsView(QTreeView):  # {{{
             try:
                 from calibre.gui2.ui import get_gui
                 get_gui().shift_esc()
-            except:
+            except Exception:
                 traceback.print_exc()
 
     @property
@@ -521,7 +521,7 @@ class TagsView(QTreeView):  # {{{
             for i, ac in enumerate(self.alter_tb.match_menu.actions()):
                 if ac is action:
                     config.set('match_tags_type', self.db.MATCH_TYPE[i])
-        except:
+        except Exception:
             pass
 
     def mousePressEvent(self, event):
@@ -732,7 +732,7 @@ class TagsView(QTreeView):  # {{{
                             os.makedirs(d)
                         with open(os.path.join(d, icon_file_name), 'wb') as f:
                             f.write(pixmap_to_data(p, format='PNG'))
-                    except:
+                    except Exception:
                         traceback.print_exc()
                         return
                 else:
@@ -1060,7 +1060,7 @@ class TagsView(QTreeView):  # {{{
                             p = path[:]
                             for k in sorted(tree_dict.keys(), key=sort_key):
                                 p.append(k)
-                                n = k[1:] if k.startswith('@') else k
+                                n = k.removeprefix('@')
                                 m.addAction(self.user_category_icon, n,
                                     partial(self.context_menu_handler,
                                             'add_to_category',

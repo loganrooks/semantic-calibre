@@ -6,6 +6,7 @@ __copyright__ = '2010, Kovid Goyal <kovid@kovidgoyal.net>'
 __docformat__ = 'restructuredtext en'
 
 import textwrap
+from functools import partial
 
 from qt.core import (
     QAbstractSpinBox,
@@ -30,7 +31,6 @@ from calibre.customize.ui import preferences_plugins
 from calibre.gui2.complete2 import EditWithComplete
 from calibre.gui2.widgets import HistoryLineEdit
 from calibre.utils.config import ConfigProxy
-from polyglot.builtins import string_or_bytes
 
 
 class AbortCommit(Exception):
@@ -189,7 +189,7 @@ class Setting:
             else:
                 self.gui_obj.clear()
                 for x in choices:
-                    if isinstance(x, string_or_bytes):
+                    if isinstance(x, (str, bytes)):
                         x = (x, x)
                     self.gui_obj.addItem(x[0], (x[1]))
         self.set_gui_val(self.get_config_val(default=False))
@@ -248,8 +248,7 @@ class Setting:
                 val = str(self.gui_obj.text())
             else:
                 idx = self.gui_obj.currentIndex()
-                if idx < 0:
-                    idx = 0
+                idx = max(idx, 0)
                 val = str(self.gui_obj.itemData(idx) or '')
         return val
 
@@ -480,8 +479,8 @@ def show_config_widget(category, name, gui=None, show_restart_msg=False,
 class ListViewWithMoveByKeyPress(QListView):
 
     def set_movement_functions(self, up_function, down_function):
-        self.up_function = up_function
-        self.down_function = down_function
+        self.up_function = partial(up_function, use_kbd_modifiers=False)
+        self.down_function = partial(down_function, use_kbd_modifiers=False)
 
     def event(self, event):
         if (event.type() == QEvent.KeyPress and
@@ -497,8 +496,8 @@ class ListViewWithMoveByKeyPress(QListView):
 class ListWidgetWithMoveByKeyPress(QListWidget):
 
     def set_movement_functions(self, up_function, down_function):
-        self.up_function = up_function
-        self.down_function = down_function
+        self.up_function = partial(up_function, use_kbd_modifiers=False)
+        self.down_function = partial(down_function, use_kbd_modifiers=False)
 
     def event(self, event):
         if (event.type() == QEvent.KeyPress and
@@ -514,8 +513,8 @@ class ListWidgetWithMoveByKeyPress(QListWidget):
 class TableWidgetWithMoveByKeyPress(QTableWidget):
 
     def set_movement_functions(self, up_function, down_function):
-        self.up_function = up_function
-        self.down_function = down_function
+        self.up_function = partial(up_function, use_kbd_modifiers=False)
+        self.down_function = partial(down_function, use_kbd_modifiers=False)
 
     def event(self, event):
         if (event.type() == QEvent.KeyPress and
@@ -526,6 +525,13 @@ class TableWidgetWithMoveByKeyPress(QTableWidget):
                 self.down_function()
             return True
         return QTableWidget.event(self, event)
+
+
+def get_move_count(row_count):
+    mods = QApplication.keyboardModifiers() & (
+        Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.ControlModifier |Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.MetaModifier)
+    return {Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.ControlModifier: row_count,
+            Qt.KeyboardModifier.ShiftModifier: 5, Qt.KeyboardModifier.ControlModifier: 10}.get(mods, 1)
 
 
 # Testing {{{

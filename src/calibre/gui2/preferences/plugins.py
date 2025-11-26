@@ -20,7 +20,6 @@ from calibre.gui2.preferences import ConfigWidgetBase, test_widget
 from calibre.gui2.preferences.plugins_ui import Ui_Form
 from calibre.utils.icu import lower
 from calibre.utils.search_query_parser import SearchQueryParser
-from polyglot.builtins import iteritems, itervalues
 
 
 class AdaptSQP(SearchQueryParser):
@@ -84,7 +83,7 @@ class PluginModel(QAbstractItemModel, AdaptSQP):  # {{{
             else:
                 try:
                     plugin = self._data[self.categories[c]][p]
-                except:
+                except Exception:
                     continue
             if query in lower(plugin.name) or query in lower(plugin.author) or \
                     query in lower(plugin.description):
@@ -428,7 +427,7 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
         all_locations = OrderedDict(ConfigWidget.LOCATIONS)
         try:
             plugin_action = plugin.load_actual_plugin(self.gui)
-        except:
+        except Exception:
             # Broken plugin, fails to initialize. Given that, it's probably
             # already configured, so we can just quit.
             return
@@ -440,12 +439,11 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
         if previously_installed:
             return
         # If already installed in a GUI container, do nothing
-        for action_names in itervalues(installed_actions):
+        for action_names in installed_actions.values():
             if plugin_action.name in action_names:
                 return
 
-        allowed_locations = [(key, text) for key, text in
-                iteritems(all_locations) if key
+        allowed_locations = [(key, text) for key, text in all_locations.items() if key
                 not in plugin_action.dont_add_to]
         if not allowed_locations:
             return  # This plugin doesn't want to live in the GUI

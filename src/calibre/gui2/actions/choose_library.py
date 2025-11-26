@@ -127,8 +127,7 @@ class LibraryUsageStats:  # {{{
             yield self.pretty(loc), loc
 
     def pretty(self, loc):
-        if loc.endswith('/'):
-            loc = loc[:-1]
+        loc = loc.removesuffix('/')
         return loc.split('/')[-1]
 
     def rename(self, location, newloc):
@@ -227,7 +226,7 @@ class BackupStatus(QDialog):  # {{{
         dirty_text = 'no'
         try:
             dirty_text = f'{db.dirty_queue_length()}'
-        except:
+        except Exception:
             dirty_text = _('none')
         self.msg.setText('<p>' + _(
             'Book metadata files remaining to be written: %s') % dirty_text)
@@ -605,7 +604,7 @@ class ChooseLibraryAction(InterfaceAction):
         self.gui.library_broker.remove_library(loc)
         try:
             os.rename(loc, newloc)
-        except:
+        except Exception:
             import traceback
             det_msg = f'Location: {loc!r} New Location: {newloc!r}\n{traceback.format_exc()}'
             error_dialog(self.gui, _('Rename failed'),

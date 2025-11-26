@@ -13,7 +13,6 @@ from math import ceil
 from calibre import force_unicode, isbytestring, prints, sanitize_file_name
 from calibre.constants import filesystem_encoding, ismacos, iswindows, preferred_encoding
 from calibre.utils.localization import _, get_udc
-from polyglot.builtins import iteritems, itervalues
 
 
 def ascii_text(orig):
@@ -221,7 +220,7 @@ def case_preserving_open_file(path, mode='wb', mkdir_mode=0o777):
         cl = comp.lower()
         try:
             candidates = [c for c in os.listdir(cpath) if c.lower() == cl]
-        except:
+        except Exception:
             # Don't have permission to do the listdir, assume the case is
             # correct as we have no way to check it.
             pass
@@ -382,7 +381,7 @@ class WindowsAtomicFolderMove:
         names = os.listdir(path)
         name_to_fileid = {x:windows_get_fileid(os.path.join(path, x)) for x in names}
         fileid_to_names = defaultdict(set)
-        for name, fileid in iteritems(name_to_fileid):
+        for name, fileid in name_to_fileid.items():
             fileid_to_names[fileid].add(name)
 
         for x in names:
@@ -421,7 +420,7 @@ class WindowsAtomicFolderMove:
                     raise err
                 prints(f'CreateFile failed for: {f!r}')
                 raise
-            except:
+            except Exception:
                 self.close_handles()
                 prints(f'CreateFile failed for: {f!r}')
                 raise
@@ -457,18 +456,18 @@ class WindowsAtomicFolderMove:
     def release_file(self, path):
         ' Release the lock on the file pointed to by path. Will also release the lock on any hardlinks to path '
         key = None
-        for p, h in iteritems(self.handle_map):
+        for p, h in self.handle_map.items():
             if samefile_windows(path, p):
                 key = (p, h)
                 break
         if key is not None:
             key[1].close()
-            remove = [f for f, h in iteritems(self.handle_map) if h is key[1]]
+            remove = [f for f, h in self.handle_map.items() if h is key[1]]
             for x in remove:
                 self.handle_map.pop(x)
 
     def close_handles(self):
-        for h in itervalues(self.handle_map):
+        for h in self.handle_map.values():
             h.close()
         self.handle_map = {}
 
@@ -596,10 +595,8 @@ def get_hardlink_function(src, dest):
     if not iswindows:
         return os.link
     from calibre_extensions import winutil
-    if src.startswith(long_path_prefix):
-        src = src[len(long_path_prefix):]
-    if dest.startswith(long_path_prefix):
-        dest = dest[len(long_path_prefix):]
+    src = src.removeprefix(long_path_prefix)
+    dest = dest.removeprefix(long_path_prefix)
     root = dest[0] + ':\\'
     if src[0].lower() == dest[0].lower() and winutil.supports_hardlinks(root):
         return windows_fast_hardlink

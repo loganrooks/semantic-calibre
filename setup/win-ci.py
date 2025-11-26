@@ -15,14 +15,14 @@ def printf(*args, **kw):
     sys.stdout.flush()
 
 
-def download_file(url):
+def download_with_retry(url, count=5):
     from urllib.request import urlopen
-    count = 5
     while count > 0:
         count -= 1
         try:
             printf('Downloading', url)
-            return urlopen(url).read()
+            with urlopen(url) as f:
+                return f.read()
         except Exception:
             if count <= 0:
                 raise
@@ -34,7 +34,7 @@ def sw():
     sw = os.environ['SW']
     os.chdir(sw)
     url = 'https://download.calibre-ebook.com/ci/calibre7/windows-64.tar.xz'
-    tarball = download_file(url)
+    tarball = download_with_retry(url)
     with tarfile.open(fileobj=io.BytesIO(tarball)) as tf:
         tf.extractall()
     printf('Download complete')
@@ -84,6 +84,7 @@ def setup_env():
     os.environ['CI'] = 'true'
     os.environ['OPENSSL_MODULES'] = os.path.join(SW, 'lib', 'ossl-modules')
     os.environ['PIPER_TTS_DIR'] = os.path.join(SW, 'piper')
+    os.environ['CALIBRE_ESPEAK_DATA_DIR'] = os.path.join(SW, 'share', 'espeak-ng-data')
 
 
 def main():
