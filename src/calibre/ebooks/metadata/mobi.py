@@ -14,7 +14,6 @@ from calibre.ebooks.mobi.utils import rescale_image
 from calibre.utils.date import now as nowf
 from calibre.utils.imghdr import what
 from calibre.utils.localization import canonicalize_lang, lang_as_iso639_1
-from polyglot.builtins import codepoint_to_chr
 
 '''
 Retrieve and modify in-place Mobipocket book metadata.
@@ -279,7 +278,7 @@ class MetadataUpdater:
 
     def hexdump(self, src, length=16):
         # Diagnostic
-        FILTER=''.join([((len(repr(codepoint_to_chr(x)))==3) and codepoint_to_chr(x)) or '.' for x in range(256)])
+        FILTER=''.join([((len(repr(chr(x)))==3) and chr(x)) or '.' for x in range(256)])
         N=0
         result=''
         while src:
@@ -343,7 +342,7 @@ class MetadataUpdater:
             pas = prefs.get('prefer_author_sort', False)
             kindle_pdoc = prefs.get('personal_doc', None)
             share_not_sync = prefs.get('share_not_sync', False)
-        except:
+        except Exception:
             pas = False
             kindle_pdoc = None
             share_not_sync = False
@@ -452,7 +451,7 @@ class MetadataUpdater:
                 if not data:
                     with open(mi.cover, 'rb') as f:
                         data = f.read()
-            except:
+            except Exception:
                 pass
             else:
                 if is_image(self.cover_record):
@@ -496,7 +495,7 @@ def get_metadata(stream):
     log = Log()
     try:
         mi = MetaInformation(os.path.basename(stream.name), [_('Unknown')])
-    except:
+    except Exception:
         mi = MetaInformation(_('Unknown'), [_('Unknown')])
     mh = MetadataHeader(stream, log)
     if mh.title and mh.title != _('Unknown'):

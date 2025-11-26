@@ -52,7 +52,7 @@ from calibre.gui2.widgets import BusyCursor
 from calibre.startup import connect_lambda
 from calibre.utils.icu import utf16_length
 from calibre.utils.xml_parse import safe_xml_fromstring
-from polyglot.builtins import as_bytes, iteritems
+from polyglot.builtins import as_bytes
 
 Change = namedtuple('Change', 'ltop lbot rtop rbot kind')
 
@@ -215,7 +215,7 @@ class TextBrowser(PlainTextEdit):  # {{{
             return
         try:
             lnum = int(self.line_number_map.get(block_number, ''))
-        except:
+        except Exception:
             lnum = 1
         for i, (num, text) in enumerate(self.headers):
             if num > block_number:
@@ -337,13 +337,12 @@ class TextBrowser(PlainTextEdit):  # {{{
                     painter.setPen(self.line_number_palette.color(QPalette.ColorRole.BrightText))
                 if text == '-':
                     painter.drawLine(r.left() + 2, (top + bottom)//2, r.right() - 2, (top + bottom)//2)
+                elif self.right:
+                    painter.drawText(r.left() + 3, top, r.right(), self.fontMetrics().height(),
+                            Qt.AlignmentFlag.AlignLeft, text)
                 else:
-                    if self.right:
-                        painter.drawText(r.left() + 3, top, r.right(), self.fontMetrics().height(),
-                                Qt.AlignmentFlag.AlignLeft, text)
-                    else:
-                        painter.drawText(r.left() + 2, top, r.right() - 5, self.fontMetrics().height(),
-                                Qt.AlignmentFlag.AlignRight, text)
+                    painter.drawText(r.left() + 2, top, r.right() - 5, self.fontMetrics().height(),
+                            Qt.AlignmentFlag.AlignRight, text)
                 if is_start:
                     painter.restore()
             block = block.next()
@@ -673,12 +672,12 @@ class DiffSplit(QSplitter):  # {{{
                     return x if x <= top else x + delta
                 lnm = LineNumberMap()
                 lnm.max_width = v.line_number_map.max_width
-                for x, val in iteritems(v.line_number_map):
+                for x, val in v.line_number_map.items():
                     dict.__setitem__(lnm, mapnum(x), val)
                 v.line_number_map = lnm
                 v.changes = [(mapnum(t), mapnum(b), k) for t, b, k in v.changes]
                 v.headers = [(mapnum(x), name) for x, name in v.headers]
-                v.images = OrderedDict((mapnum(x), v) for x, v in iteritems(v.images))
+                v.images = OrderedDict((mapnum(x), v) for x, v in v.images.items())
             v.viewport().update()
 
     def get_lines_for_image(self, img, view):

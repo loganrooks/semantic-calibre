@@ -12,6 +12,7 @@ import weakref
 from collections import namedtuple
 from functools import wraps
 from io import BytesIO
+from queue import LifoQueue
 from textwrap import wrap
 from threading import Event, Thread
 
@@ -68,8 +69,6 @@ from calibre.gui2.pin_columns import PinContainer
 from calibre.utils import join_with_timeout
 from calibre.utils.config import prefs, tweaks
 from calibre.utils.img import convert_PIL_image_to_pixmap
-from polyglot.builtins import itervalues
-from polyglot.queue import LifoQueue
 
 CM_TO_INCH = 0.393701
 CACHE_FORMAT = 'PPM'
@@ -210,7 +209,7 @@ def drag_data(self):
     def path_for_id(i):
         try:
             ans = db.format_path(i, fmt, index_is_id=True)
-        except:
+        except Exception:
             ans = None
         if ans is None:
             fmts = db.formats(i, index_is_id=True)
@@ -221,7 +220,7 @@ def drag_data(self):
             for f in fmts:
                 try:
                     ans = db.format_path(i, f, index_is_id=True)
-                except:
+                except Exception:
                     ans = None
         if ans is None:
             ans = db.abspath(i, index_is_id=True)
@@ -389,7 +388,7 @@ class AlternateViews:
             view.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def set_database(self, db, stage=0):
-        for view in itervalues(self.views):
+        for view in self.views.values():
             if view is not self.main_view:
                 view.set_database(db, stage=stage)
 
@@ -418,7 +417,7 @@ class AlternateViews:
         self.current_view.select_rows(rows)
 
     def set_context_menu(self, menu):
-        for view in itervalues(self.views):
+        for view in self.views.values():
             if view is not self.main_view:
                 view.set_context_menu(menu)
 
@@ -752,6 +751,15 @@ class CoverDelegate(QStyledItemDelegate):
                 if on_device:
                     val = _('This book is on the device in %s') % on_device
                     tt += '<br><br>' + val
+                template = db.pref('column_tooltip_templates', {}).get('title', '')
+                if template:
+                    try:
+                        global_vars = {'column_lookup_name': 'title', 'original_text': tt}
+                        mi = db.get_proxy_metadata(book_id)
+                        tt = index.model().formatter.safe_format(
+                                template, {}, _('tooltip template error'), mi, global_vars=global_vars)
+                    except Exception as e:
+                        tt = str(e)
                 QToolTip.showText(event.globalPos(), tt, view)
                 return True
         return False

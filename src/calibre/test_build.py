@@ -20,7 +20,6 @@ import unittest
 from calibre.constants import islinux, ismacos, iswindows, plugins_loc
 from calibre.utils.resources import get_image_path as I
 from calibre.utils.resources import get_path as P
-from polyglot.builtins import iteritems
 
 is_ci = os.environ.get('CI', '').lower() == 'true'
 is_sanitized = 'libasan' in os.environ.get('LD_PRELOAD', '')
@@ -113,6 +112,14 @@ class BuildTest(unittest.TestCase):
         from html5_parser import parse
         parse('<p>xxx')
 
+    def test_poppler(self):
+        import subprocess
+
+        from calibre.ebooks.pdf.pdftohtml import PDFTOHTML, popen
+        p = popen([PDFTOHTML, '--help'], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        if p.wait() != 0:
+            raise RuntimeError(f'pdftohtml --help failed with return code: {p.returncode}')
+
     def test_bs4(self):
         import bs4
         import soupsieve
@@ -123,14 +130,9 @@ class BuildTest(unittest.TestCase):
         from speechd.client import SSIPClient
         del SSIPClient
 
-    @unittest.skipIf('SKIP_SPEECH_TESTS' in os.environ, 'Speech support is opted out')
     def test_piper(self):
-        import subprocess
-
-        from calibre.constants import piper_cmdline
-        self.assertTrue(piper_cmdline())
-        raw = subprocess.check_output(piper_cmdline() + ('-h',), stderr=subprocess.STDOUT).decode()
-        self.assertIn('--sentence_silence', raw)
+        from calibre.utils.tts.piper import simple_test
+        simple_test()
 
     def test_zeroconf(self):
         import ifaddr
@@ -162,6 +164,11 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(etree.tostring(root), raw)
         from lxml import html
         html.fromstring('<p>\U0001f63a')
+        from calibre.utils.xml_parse import safe_html_fromstring, safe_xml_fromstring
+        bad = '\U0001f468' * 8192
+        bad = f'<p>{bad}</p>'
+        safe_xml_fromstring(bad)
+        safe_html_fromstring(bad)
 
     def test_certgen(self):
         from calibre.utils.certgen import create_key_pair
@@ -207,7 +214,7 @@ class BuildTest(unittest.TestCase):
         d = winutil.localeconv()
         au(d['thousands_sep'], 'localeconv')
         au(d['decimal_point'], 'localeconv')
-        for k, v in iteritems(d):
+        for k, v in d.items():
             au(v, k)
         os.environ['XXXTEST'] = 'YYY'
         self.assertEqual(os.getenv('XXXTEST'), 'YYY')

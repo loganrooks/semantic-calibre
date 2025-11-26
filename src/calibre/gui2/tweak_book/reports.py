@@ -69,7 +69,7 @@ from calibre.utils.icu import numeric_sort_key, primary_contains
 from calibre.utils.localization import calibre_langcode_to_name, canonicalize_lang, ngettext
 from calibre.utils.unicode_names import character_name_from_code
 from calibre.utils.webengine import secure_webengine
-from polyglot.builtins import as_bytes, iteritems
+from polyglot.builtins import as_bytes
 
 # Utils {{{
 
@@ -716,13 +716,12 @@ class LinksWidget(QWidget):
         if index.column() < 3:
             # Jump to source
             jump_to_location(link.location)
-        else:
-            # Jump to destination
-            if link.is_external:
-                if link.href:
-                    open_url(link.href)
-            elif link.anchor.location:
-                jump_to_location(link.anchor.location)
+        # Jump to destination
+        elif link.is_external:
+            if link.href:
+                open_url(link.href)
+        elif link.anchor.location:
+            jump_to_location(link.anchor.location)
 
     def save(self):
         self.links.save_table('links-table')
@@ -1018,12 +1017,14 @@ class CSSRulesModel(QAbstractItemModel):
         return 1
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if index.column() != 0:
+            return
         if role == SORT_ROLE:
             entry = self.index_to_entry(index)
             if isinstance(entry, CSSEntry):
-                return entry.count if self.sort_on_count else entry.sort_key
+                return entry.count if self.sort_on_count else QByteArray(entry.sort_key)
             if isinstance(entry, CSSFileMatch):
-                return len(entry.locations) if self.sort_on_count else entry.sort_key
+                return len(entry.locations) if self.sort_on_count else QByteArray(entry.sort_key)
             if isinstance(entry, MatchLocation):
                 return entry.sourceline
         elif role == Qt.ItemDataRole.DisplayRole:
@@ -1099,6 +1100,7 @@ class CSSWidget(QWidget):
         e.setClearButtonEnabled(True)
         self.model = m = self.MODEL(self)
         self.proxy = p = self.PROXY(self)
+        m.sort_on_count = self.read_state('sort-on-counts', True)
         p.setSourceModel(m)
         self.view = f = QTreeView(self)
         f.setAlternatingRowColors(True)
@@ -1111,10 +1113,10 @@ class CSSWidget(QWidget):
         l.addLayout(h)
         h.addWidget(QLabel(_('Sort by:')))
         self.counts_button = b = QRadioButton(_('&Counts'), self)
-        b.setChecked(self.read_state('sort-on-counts', True))
+        b.setChecked(m.sort_on_count)
         h.addWidget(b)
         self.name_button = b = QRadioButton(_('&Name'), self)
-        b.setChecked(not self.read_state('sort-on-counts', True))
+        b.setChecked(not m.sort_on_count)
         h.addWidget(b)
         b.toggled.connect(self.resort)
         h.addStrut(20)
@@ -1241,9 +1243,9 @@ class ClassesModel(CSSRulesModel):
         if role == SORT_ROLE:
             entry = self.index_to_entry(index)
             if isinstance(entry, ClassEntry):
-                return entry.num_of_matches if self.sort_on_count else entry.sort_key
+                return entry.num_of_matches if self.sort_on_count else QByteArray(entry.sort_key)
             if isinstance(entry, ClassFileMatch):
-                return len(entry.class_elements) if self.sort_on_count else entry.sort_key
+                return len(entry.class_elements) if self.sort_on_count else QByteArray(entry.sort_key)
             if isinstance(entry, ClassElement):
                 return entry.line_number
             if isinstance(entry, CSSRule):
@@ -1505,7 +1507,7 @@ class Reports(Dialog):
                 ' information.'), det_msg=data, show=True)
         data, timing = data
         if DEBUG:
-            for x, t in sorted(iteritems(timing), key=itemgetter(1)):
+            for x, t in sorted(timing.items(), key=itemgetter(1)):
                 print(f'Time for {x:6} data: {t:.3f} seconds')
         self.reports(data)
 

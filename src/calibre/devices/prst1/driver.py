@@ -24,7 +24,6 @@ from calibre.devices.usbms.device import USBDevice
 from calibre.devices.usbms.driver import USBMS
 from calibre.ebooks.metadata import authors_to_sort_string, authors_to_string
 from calibre.prints import debug_print
-from polyglot.builtins import long_type
 
 DBPATH = 'Sony_Reader/database/books.db'
 THUMBPATH = 'Sony_Reader/database/cache/books/%s/thumbnail/main_thumbnail.jpg'
@@ -330,7 +329,7 @@ class PRST1(USBMS):
         cursor.execute(query)
         row = cursor.fetchone()
 
-        return long_type(row[0])
+        return int(row[0])
 
     def get_database_min_id(self, source_id):
         sequence_min = 0
@@ -465,12 +464,11 @@ class PRST1(USBMS):
                         author = newmi.author_sort
                     else:
                         author = authors_to_sort_string(newmi.authors)
+                elif use_sony_authors:
+                    author = newmi.authors[0]
                 else:
-                    if use_sony_authors:
-                        author = newmi.authors[0]
-                    else:
-                        author = authors_to_string(newmi.authors)
-            except:
+                    author = authors_to_string(newmi.authors)
+            except Exception:
                 author = _('Unknown')
             title = newmi.title or _('Unknown')
 
@@ -796,7 +794,7 @@ class PRST1(USBMS):
         if not name:
             try:
                 name = [t for t in book.tags if t != _('News')][0]
-            except:
+            except Exception:
                 name = None
 
         if not name:
@@ -805,7 +803,7 @@ class PRST1(USBMS):
         pubdate = None
         try:
             pubdate = int(time.mktime(book.pubdate.timetuple()) * 1000)
-        except:
+        except Exception:
             pass
 
         cursor = connection.cursor()

@@ -23,6 +23,333 @@
 # - title by author
 # }}}
 
+{{{ 8.15.0 2025-11-21
+
+:: new features
+
+- [2131619] E-book viewer: Highlights panel: Show the date for highlights in the tooltip when hovering over a highlight
+
+- Comments editor: When changing case preserve as much text formatting as feasible
+
+- [2131158] Comments editor: Add shortcuts for case change operations. Select some text, right click and see the case change menu for the shortcuts
+
+:: bug fixes
+
+- [2131622] Editing book list: Be robust against the book list changing in the background when a book is auto added or similar while a cell is being edited
+
+- [2130880] Edit book: Fix a memory leak in the HTML syntax highlighter
+
+- [2131557] calibredb list: Fix identifier values not being shown
+
+:: improved recipes
+- Guardian
+
+:: new recipes
+- Hack a Day by Rui Rebelo
+}}}
+
+{{{ 8.14.0 2025-11-07
+
+:: new features
+
+- Tolino driver: Add support for latest firmware
+
+- [2130804] When showing completions for languages show all languages that contain the typed in string instead of only languages that start with the typed in string
+
+- When showing completions in substring match mode, order the completions by how close to the start the query is
+
+- [2127819] A new shortcut Ctrl+Alt+Shift+P to switch to the previously applied Virtual library
+
+:: bug fixes
+
+- [2130764] FB2 Input: Fix a remote code execution vulnerability from maliciously crafted FB2 files
+
+- [2130603] E-book viewer: Ignore soft hyphens when looking up words
+
+- [2130573] Catalog export: Fix export of languages in BibTeX format
+
+- [2128853] Windows: Fix Open With not working with Microsoft Paint
+
+:: improved recipes
+- Harper's Magazine
+- Afrique 21
+- Orient XXI
+- The Atlantic
+
+}}}
+
+{{{ 8.13.0 2025-10-18
+
+:: new features
+
+- [2126881] Virtual libraries: Allow defining their search expressions more comfortably in a multi-line edit box
+
+- Open with: On Windows launch the specified program via the windows API for executing programs to decouple it more thoroughly from the calibre environment
+
+:: bug fixes
+
+- Get books: Fix ebooks.com plugin
+
+- calibre-server: Fix CALIBRE_OVERRIDE_DATABASE_PATH not working
+
+- Export library: Don't use /tmp on Linux fixes export breaking with large FTS database on Linux distros that mount /tmp in RAM
+
+- [2126611] Fix a regression in 8.11 that caused errors when trying to open a book from the full text search results while the search was still running
+
+:: improved recipes
+- Todoist
+- NZZ
+}}}
+
+{{{ 8.12.0 2025-10-01
+
+:: new features
+
+- Tolino driver: Support for latest Tolino firmware 5.11.230427
+
+- Ollama AI: Allow setting arbitrary HTTP headers to send with every request
+
+:: bug fixes
+
+- [2126569] Fix a regression in the previous release that broke conversion of HTML that does not parse as XHTML
+
+- Ollama AI: Fix configuration of custom URL not working
+
+}}}
+
+{{{ 8.11.1 2025-09-26
+
+:: new features
+
+- [major] E-book viewer: Add an "Ask AI" tab to the dictionary lookup panel. Allows you to query AI about the currently selected text.
+
+  Supports hundreds of AI models via Providers such as Google, OpenRouter, GitHub and locally running models via Ollama.
+  Many of them can be used free of charge. Note that this feature is completely optional and no AI related code is even loaded until you configure an AI provider.
+
+- [2122257] Preferences: Show the keyboard shortcut for each category in preferences in the tooltip
+
+:: bug fixes
+
+- [2122747] E-book viewer: Fix modifying an existing highlight causing duplicates to be created in some books
+
+- E-book viewer: Fix very large e-books sometimes having a few non working links on Windows
+
+- [2123829] PDB Input: Fix failure to convert some PDB files with sightly malformed headers
+
+- [2125438] Fix error when trying to add the first icon rule to the Tag browser
+
+- [2041848] E-book viewer: Fix Esc key not closing footnote popup when the popup has keyboard focus
+
+- E-book viewer: Fix placement of selection handles in some books when modifying an existing highlight
+
+- Windows build: Sign the .pyd DLLs in addition to the .dll DLLs
+
+- [2125742] Windows: Fix regression in (8.11.0) causing conversion to be broken when metadata contains non-BMP characters
+
+:: improved recipes
+- New York Times
+- Economist
+- El Diplo
+- New York Review of Books
+
+}}}
+
+{{{ 8.10.0 2025-09-05
+
+:: new features
+
+- Book list: Allow controlling the tooltips displayed for every column using a template. Right click the column header and choose "Define tooltip template" to set the tooltip for that column
+
+- [2121304] MTP driver: Allow creating format specific destinations for audiobook files
+
+- Preferences->Keyboard: Allow searching by shortcut as well as by name
+
+:: bug fixes
+
+- [2121737] Kindle MTP driver: Fix APNX files being placed in incorrect location when books are sent to subfolders inside the root folder
+
+- [2121897] E-book viewer: Read Aloud: Fix regression in previous release that broke changing voices when engine is set to 'Automatically select'
+
+- [2121701] Fix a regression in the previous release that broke markdown output
+
+:: improved recipes
+- Harvard Business Review
+- Outlook Magazine
+}}}
+
+{{{ 8.9.0 2025-08-22
+
+:: new features
+
+- [2109496] Annotations browser: Add a color swatch in the results list to make seeing the type of highlight easier
+
+- [2117322] Match books in library window: When doing the initial search using the title of the book on the device, if no matches are found remove trailing text in parentheses or after a colon and try again
+
+- [2118371] When merging books via drag and drop show the cover of the target book
+
+- [2120726] HTMLZ Output: Add support for embedded fonts
+
+- Plugin installation window: Allow filtering available plugins by category
+
+- [2119557] Fetch news: Add a sub-menu to the right click menu of the Fetch news button that shows recently downloaded news sources
+
+:: bug fixes
+
+- [2099740] Edit book: When pasting text from the clipboard ensure it is normalized to NFC form
+
+- [2109789] Content server viewer: Improve the selection dialog for choosing a Text-to-speech voice
+
+- [2117412] Content server: Fix an error when editing a book's metadata to change both the cover and another field
+
+:: improved recipes
+- New York Times
+- Todoist
+- Tagespost
+
+:: new recipes
+- Startechery by thekabistro
+}}}
+
+{{{ 8.8.0 2025-08-08
+
+:: new features
+
+- E-book viewer: Improve display of Lookup results from Google
+
+- Kobo driver: Add support for latest Tolino firmware
+
+- Conversion: Handle -epub-text-emphasis properties used in some Japanese language EPUB books
+
+- [2117433] Piper Neural text to speech engine: re-write the backend used to run the Piper speech models to no longer need an external binary for improved performance and robustness
+
+:: bug fixes
+
+- Edit book: Reports: Fix sorting by name of CSS rules
+
+- [2118744] Fix template based custom column of tags type not being treated as multi valued when using it for similarity searches
+
+- When adding books recursively do not try to import folder whose names named with an ebook file extension. These are, for example, generated by Apple Books
+
+- [2117255 2117336] EPUB3 Output: Fix various issues with processing nav files when they contain more than just the Table of Contents and are not included in the spine.
+
+:: improved recipes
+- Economist
+- Press Information Bureau
+- Indian Express
+- Wall Street Journal
+- De Tijd
+- Washington Post
+}}}
+
+{{{ 8.7.0 2025-07-18
+
+:: new features
+
+- Kindle driver: Add support for generating page number files (APNX) on 2024 and newer MTP based Kindles
+
+- [2116804] When finding similar books by author ignore "et al." suffix on author names
+
+:: bug fixes
+
+- [2116864] Fix a regression in the previous release that broke configuring Sending of books to device
+
+- [2117113] Kobo driver: Fix a regression that caused ancient, pre-Touch kobo devices to no longer work with calibre
+
+- MTP driver: Workaround for LibMTP no longer returning device serial numbers on some systems
+
+- Edit book: Fix the next/previous buttons in the Text search tool not working
+
+- [2116065] Fix series and publisher mapping rules not handling commas correctly when downloading metadata one book at a time
+
+- Edit metadata dialog: When there are only a few custom comments like fields stretch them vertically to take up unused space
+
+:: improved recipes
+- New York Magazine
+- World Archaeology
+- Minerva Magazine
+- Military History
+- Ancient Egypt
+
+}}}
+
+{{{ 8.6.0 2025-07-10
+
+:: new features
+
+- Content server: Add a checkbox in content server user preferences to prevent a user account from changing its own password via the web interface
+
+- Restoring database: Improve performance by an order of magnitude
+
+- Add a tweak to Preferences->Tweaks to permit displaying the sort value for series in the Tag browser
+
+- Welcome wizard: Change default output format to AZW3 for Kindle as MOBI is obsolete and all Kindles released within the last decade plus support AZW3
+
+- Add 'Search "not in"' and 'Filter "not in'" buttons to Manage authors and Manage Items
+
+:: bug fixes
+
+- [2115246] Windows: Fix a regression in the previous release that caused terminal windows to popup momentarily when adding PDF files or converting them
+
+- [2115057] E-book viewer: Fix a regression in 8.4 that broke fading of the background image
+
+- [2116006] Tag browser: Fix clicking on categories to search for books by first letter of series not working correctly for non-English language books
+
+- [2115111] Edit metadata individually: Ensure Next/Previous buttons work even if something re-orders the books in the book list. They will now iterate over the books as they were at the time the dialog is created
+
+- [2115084] Windows: Generate catalog: Workaround for systems where a broken antivirus or similar holds open files in the catalog library causing a permission denied error
+
+:: improved recipes
+- Economist
+- 1843
+- Financial Times
+- PC World
+- Muy Interesante Mexico
+- Hindu Business Line
+- Business Standard
+- Hindustan Times
+- The Week
+- Times of India
+- Hindustan
+- Financial Times
+- Reason
+
+:: new recipes
+- La Presse by quatorze
+}}}
+
+{{{ 8.5.0 2025-06-20
+
+:: new features
+
+- The scrollbars used in calibre in light mode are now the same style as the ones in dark mode, this improves the contrast making the scrollbar more accessible
+
+- Kobo driver: add an option to change how the Kobo displays series numbers using a template.
+
+- [2112424] Manage data files dialog: Add a button to cancel remaining books when managing multiple books
+
+- Kobo driver: add support for new Tolino firmware
+
+:: bug fixes
+
+- [2111559] Prevent Windows 11 from starting a conhost.exe process for every calibre worker process
+
+- E-book viewer: Improve highlight grouping with recurring chapter names
+
+- [2110400] When sending emails to amazon and pocketbook use random English text instead of UUIDs for subject/body.
+
+:: improved recipes
+- NYTimes
+- WSJ
+- Financial Times
+- Eenadu
+- Fokus.se
+- Business standard
+- Go comics
+- NZ Herald
+- TLS Magazine
+
+}}}
+
 {{{ 8.4.0 2025-05-09
 
 :: new features

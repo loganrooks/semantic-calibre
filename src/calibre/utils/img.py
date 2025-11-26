@@ -22,7 +22,6 @@ from calibre.utils.filenames import atomic_rename
 from calibre.utils.imghdr import what
 from calibre.utils.resources import get_image_path as I
 from calibre_extensions import imageops
-from polyglot.builtins import string_or_bytes
 
 
 # Utilities {{{
@@ -426,9 +425,8 @@ def scale_image(data, width=60, height=80, compression_quality=70, as_png=False,
         scaled, nwidth, nheight = fit_image(img.width(), img.height(), width, height)
         if scaled:
             img = img.scaled(int(nwidth), int(nheight), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-    else:
-        if img.width() != width or img.height() != height:
-            img = img.scaled(int(width), int(height), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    elif img.width() != width or img.height() != height:
+        img = img.scaled(int(width), int(height), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
     fmt = 'PNG' if as_png else 'JPEG'
     w, h = img.width(), img.height()
     return w, h, image_to_data(img, compression_quality=compression_quality, fmt=fmt)
@@ -516,7 +514,7 @@ def quantize_image(img, max_colors=256, dither=True, palette=''):
     img = image_from_data(img)
     if img.hasAlphaChannel():
         img = blend_image(img)
-    if palette and isinstance(palette, string_or_bytes):
+    if palette and isinstance(palette, (str, bytes)):
         palette = palette.split()
     return imageops.quantize(img, int(max_colors), dither, tuple(QColor(x).rgb() for x in palette))
 
@@ -763,8 +761,10 @@ def read_text_from_container(container, target_lang=''):
 
 def read_alt_text_from_xmp(xmp, target_lang='') -> str:
     from lxml import etree
+
+    from calibre.utils.xml_parse import safe_xml_fromstring
     try:
-        root = etree.fromstring(xmp)
+        root = safe_xml_fromstring(xmp)
     except Exception:
         return ''
     # print(etree.tostring(root, encoding='utf-8', pretty_print=True).decode())

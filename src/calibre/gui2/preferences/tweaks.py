@@ -41,7 +41,6 @@ from calibre.gui2.widgets import PythonHighlighter
 from calibre.utils.config_base import default_tweaks_raw, exec_tweaks, normalize_tweak, read_custom_tweaks, write_custom_tweaks
 from calibre.utils.icu import lower
 from calibre.utils.search_query_parser import ParseException, SearchQueryParser
-from polyglot.builtins import iteritems
 
 ROOT = QModelIndex()
 
@@ -99,7 +98,7 @@ class Tweak:  # {{{
         for line in self.doc.splitlines():
             if line:
                 ans.append('# ' + line)
-        for key, val in iteritems(self.default_values):
+        for key, val in self.default_values.items():
             val = self.custom_values.get(key, val)
             ans.append(f'{key} = {val!r}')
         ans = '\n'.join(ans)
@@ -111,7 +110,7 @@ class Tweak:  # {{{
 
     @property
     def is_customized(self):
-        for x, val in iteritems(self.default_values):
+        for x, val in self.default_values.items():
             cval = self.custom_values.get(x, val)
             if normalize_tweak(cval) != normalize_tweak(val):
                 return True
@@ -121,7 +120,7 @@ class Tweak:  # {{{
     def edit_text(self):
         from pprint import pformat
         ans = [f'# {self.name}']
-        for x, val in iteritems(self.default_values):
+        for x, val in self.default_values.items():
             val = self.custom_values.get(x, val)
             if isinstance(val, (list, tuple, dict, set, frozenset)):
                 ans.append(f'{x} = {pformat(val)}')
@@ -152,7 +151,7 @@ class Tweaks(QAbstractListModel, AdaptSQP):  # {{{
         row = index.row()
         try:
             tweak = self.tweaks[row]
-        except:
+        except Exception:
             return None
         if role == Qt.ItemDataRole.DisplayRole:
             return tweak.name
@@ -165,7 +164,7 @@ class Tweaks(QAbstractListModel, AdaptSQP):  # {{{
             if tweak.is_customized:
                 tt = '<p>'+_('This tweak has been customized')
                 tt += '<pre>'
-                for varn, val in iteritems(tweak.custom_values):
+                for varn, val in tweak.custom_values.items():
                     tt += f'{varn} = {val!r}\n\n'
             return textwrap.fill(tt)
         if role == Qt.ItemDataRole.UserRole:
@@ -175,7 +174,7 @@ class Tweaks(QAbstractListModel, AdaptSQP):  # {{{
     def parse_tweaks(self):
         try:
             custom_tweaks = read_custom_tweaks()
-        except:
+        except Exception:
             print('Failed to load custom tweaks file')
             import traceback
             traceback.print_exc()
@@ -267,14 +266,14 @@ class Tweaks(QAbstractListModel, AdaptSQP):  # {{{
         if self.plugin_tweaks:
             ans.extend(['', '',
                 '# The following are tweaks for installed plugins', ''])
-            for key, val in iteritems(self.plugin_tweaks):
+            for key, val in self.plugin_tweaks.items():
                 ans.extend([f'{key} = {val!r}', '', ''])
         return '\n'.join(ans)
 
     @property
     def plugin_tweaks_string(self):
         ans = []
-        for key, val in iteritems(self.plugin_tweaks):
+        for key, val in self.plugin_tweaks.items():
             ans.extend([f'{key} = {val!r}', '', ''])
         ans = '\n'.join(ans)
         if isbytestring(ans):
@@ -494,7 +493,7 @@ class ConfigWidget(ConfigWidgetBase):
             g, l = {}, {}
             try:
                 exec(str(d.edit.toPlainText()), g, l)
-            except:
+            except Exception:
                 import traceback
                 return error_dialog(self, _('Failed'),
                     _('There was a syntax error in your tweak. Click '
@@ -538,7 +537,7 @@ class ConfigWidget(ConfigWidgetBase):
             l, g = {}, {}
             try:
                 exec(str(self.edit_tweak.toPlainText()), g, l)
-            except:
+            except Exception:
                 import traceback
                 error_dialog(self.gui, _('Failed'),
                         _('There was a syntax error in your tweak. Click '
@@ -554,7 +553,7 @@ class ConfigWidget(ConfigWidgetBase):
             raw = raw.encode('utf-8')
         try:
             custom_tweaks = exec_tweaks(raw)
-        except:
+        except Exception:
             import traceback
             error_dialog(self, _('Invalid tweaks'),
                     _('The tweaks you entered are invalid, try resetting the'

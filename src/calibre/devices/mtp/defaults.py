@@ -9,7 +9,6 @@ import re
 import traceback
 
 from calibre.constants import iswindows
-from polyglot.builtins import iteritems
 
 supernote_settings = {
     'calibre_file_paths': {'metadata':'Document/metadata.calibre', 'driveinfo':'Document/driveinfo.calibre'},
@@ -26,6 +25,7 @@ class DeviceDefaults:
                     'format_map': ['azw3', 'mobi', 'azw',
                                     'azw1', 'azw4', 'kfx', 'pdf'],
                     'send_to': ['documents', 'kindle', 'books'],
+                    'apnx': {'send': True, 'method': 'fast', 'custom_column_page_count': None, 'custom_column_method': None}
                     }
                 ),
                 # B&N devices
@@ -50,7 +50,7 @@ class DeviceDefaults:
             if m is not None:
                 try:
                     vid, pid = int(m.group(1), 16), int(m.group(2), 16)
-                except:
+                except Exception:
                     traceback.print_exc()
         else:
             vid, pid = device.vendor_id, device.product_id
@@ -58,7 +58,7 @@ class DeviceDefaults:
         for rule in self.rules:
             tests = rule[0]
             matches = True
-            for k, v in iteritems(tests):
+            for k, v in tests.items():
                 if k == 'vendor' and v != vid:
                     matches = False
                     break

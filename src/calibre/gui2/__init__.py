@@ -5,6 +5,7 @@ __copyright__ = '2008, Kovid Goyal <kovid at kovidgoyal.net>'
 
 import glob
 import os
+import queue
 import signal
 import sys
 import threading
@@ -72,6 +73,7 @@ from calibre.constants import (
     isxp,
     numeric_version,
     plugins_loc,
+    sanitize_env_vars,
 )
 from calibre.constants import __appname__ as APP_UID
 from calibre.ebooks.metadata import MetaInformation
@@ -89,8 +91,6 @@ from calibre.utils.localization import get_lang
 from calibre.utils.resources import get_image_path as I
 from calibre.utils.resources import get_path as P
 from calibre.utils.resources import user_dir
-from polyglot import queue
-from polyglot.builtins import iteritems, string_or_bytes
 
 del pqc, geometry_for_restore_as_dict
 NO_URL_FORMATTING = QUrl.UrlFormattingOption.None_
@@ -488,6 +488,8 @@ def create_defs():
     defs['book_details_note_link_icon_width'] = 1.0
     defs['tag_browser_show_category_icons'] = True
     defs['tag_browser_show_value_icons'] = True
+    defs['template_editor_run_as_you_type'] = True
+    defs['template_editor_show_all_selected_books'] = True
 
     def migrate_tweak(tweak_name, pref_name):
         # If the tweak has been changed then leave the tweak in the file so
@@ -667,7 +669,7 @@ def is_widescreen():
     if _is_widescreen is None:
         try:
             _is_widescreen = available_width()/available_height() > 1.4
-        except:
+        except Exception:
             _is_widescreen = False
     return _is_widescreen
 
@@ -844,7 +846,7 @@ class FunctionDispatcher(QObject):
     def dispatch(self, q, args, kwargs):
         try:
             res = self.func(*args, **kwargs)
-        except:
+        except Exception:
             res = None
         q.put(res)
 
@@ -875,7 +877,7 @@ class GetMetadata(QObject):
         from calibre.ebooks.metadata.meta import metadata_from_formats
         try:
             mi = metadata_from_formats(*args, **kwargs)
-        except:
+        except Exception:
             mi = MetaInformation('', [_('Unknown')])
         self.metadataf.emit(id, mi)
 
@@ -883,7 +885,7 @@ class GetMetadata(QObject):
         from calibre.ebooks.metadata.meta import get_metadata
         try:
             mi = get_metadata(*args, **kwargs)
-        except:
+        except Exception:
             mi = MetaInformation('', [_('Unknown')])
         self.metadata.emit(id, mi)
 
@@ -1083,7 +1085,7 @@ class Translator(QTranslator):
     def translate(self, *args, **kwargs):
         try:
             src = str(args[1])
-        except:
+        except Exception:
             return ''
         t = _
         return t(src)
@@ -1215,6 +1217,7 @@ class Application(QApplication):
         if override_program_name and hasattr(QApplication, 'setDesktopFileName'):
             QApplication.setDesktopFileName(override_program_name)
         QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)  # needed for webengine
+        self._store_args_to_prevent_gc = args  # Qt barfs is python garbage collects these
         QApplication.__init__(self, args)
         if should_handle_calibre_urls:
             # See https://bugreports.qt.io/browse/QTBUG-134316
@@ -1345,10 +1348,9 @@ class Application(QApplication):
                 f.setFamily('Segoe UI')
                 f.setPointSize(9)
                 QApplication.setFont(f)
-        else:
-            if q == ('Sans Serif', 9):  # Hard coded Qt settings, no user preference detected
-                f.setPointSize(10)
-                QApplication.setFont(f)
+        elif q == ('Sans Serif', 9):  # Hard coded Qt settings, no user preference detected
+            f.setPointSize(10)
+            QApplication.setFont(f)
         f = QFontInfo(f)
         self.original_font = (f.family(), f.pointSize(), f.weight(), f.italic(), 100)
 
@@ -1480,55 +1482,11 @@ class Application(QApplication):
 _store_app = None
 
 
-@contextmanager
-def sanitize_env_vars():
-    '''Unset various environment variables that calibre uses. This
-    is needed to prevent library conflicts when launching external utilities.'''
-
-    if islinux and isfrozen:
-        env_vars = {
-            'LD_LIBRARY_PATH':'/lib', 'OPENSSL_MODULES': '/lib/ossl-modules',
-        }
-    elif iswindows:
-        env_vars = {'OPENSSL_MODULES': None, 'QTWEBENGINE_DISABLE_SANDBOX': None}
-        if os.environ.get('CALIBRE_USE_SYSTEM_CERTIFICATES', '') != '1':
-            env_vars['SSL_CERT_FILE'] = None
-    elif ismacos:
-        env_vars = {k:None for k in (
-                    'FONTCONFIG_FILE FONTCONFIG_PATH OPENSSL_ENGINES OPENSSL_MODULES').split()}
-        if os.environ.get('CALIBRE_USE_SYSTEM_CERTIFICATES', '') != '1':
-            env_vars['SSL_CERT_FILE'] = None
-    else:
-        env_vars = {}
-
-    originals = {x:os.environ.get(x, '') for x in env_vars}
-    changed = {x:False for x in env_vars}
-    for var, suffix in env_vars.items():
-        paths = [x for x in originals[var].split(os.pathsep) if x]
-        npaths = [] if suffix is None else [x for x in paths if x != (sys.frozen_path + suffix)]
-        if len(npaths) < len(paths):
-            if npaths:
-                os.environ[var] = os.pathsep.join(npaths)
-            else:
-                del os.environ[var]
-            changed[var] = True
-
-    try:
-        yield
-    finally:
-        for var, orig in originals.items():
-            if changed[var]:
-                if orig:
-                    os.environ[var] = orig
-                elif var in os.environ:
-                    del os.environ[var]
-
-
 SanitizeLibraryPath = sanitize_env_vars  # For old plugins
 
 
 def open_url(qurl):
-    if isinstance(qurl, string_or_bytes):
+    if isinstance(qurl, (str, bytes)):
         qurl = QUrl(qurl)
     scheme = qurl.scheme().lower() or 'file'
     import fnmatch
@@ -1574,7 +1532,7 @@ def open_url(qurl):
 
 
 def safe_open_url(qurl):
-    if isinstance(qurl, string_or_bytes):
+    if isinstance(qurl, (str, bytes)):
         qurl = QUrl(qurl)
     if qurl.scheme() in ('', 'file'):
         path = qurl.toLocalFile()
@@ -1620,6 +1578,10 @@ def ensure_app(headless=True):
     with _ea_lock:
         if _store_app is None and QApplication.instance() is None:
             args = sys.argv[:1]
+            if not headless:
+                _store_app = Application([])
+                sys.excepthook = simple_excepthook
+                return
             has_headless = ismacos or islinux or isbsd
             if headless and has_headless:
                 args += ['-platformpluginpath', plugins_loc, '-platform', os.environ.get('CALIBRE_HEADLESS_PLATFORM', 'headless')]
@@ -1723,7 +1685,7 @@ if is_running_from_develop:
 
 def event_type_name(ev_or_etype):
     etype = ev_or_etype.type() if isinstance(ev_or_etype, QEvent) else ev_or_etype
-    for name, num in iteritems(vars(QEvent)):
+    for name, num in vars(QEvent).items():
         if num == etype:
             return name
     return 'UnknownEventType'

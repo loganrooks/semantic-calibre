@@ -757,12 +757,11 @@ def details_context_menu_event(view, ev, book_info, add_popup_action=False, edit
     from calibre.gui2.ui import get_gui
     if add_popup_action:
         menu.addMenu(get_gui().iactions['Show Book Details'].qaction.menu())
-    else:
-        # We can't open edit metadata from a locked window because EM expects to
-        # be editing the current book, which this book probably isn't
-        if edit_metadata is not None:
-            ema = get_gui().iactions['Edit Metadata'].menuless_qaction
-            menu.addAction(_('Open the Edit metadata window') + '\t' + ema.shortcut().toString(QKeySequence.SequenceFormat.NativeText), edit_metadata)
+    # We can't open edit metadata from a locked window because EM expects to
+    # be editing the current book, which this book probably isn't
+    elif edit_metadata is not None:
+        ema = get_gui().iactions['Edit Metadata'].menuless_qaction
+        menu.addAction(_('Open the Edit metadata window') + '\t' + ema.shortcut().toString(QKeySequence.SequenceFormat.NativeText), edit_metadata)
     if not reindex_fmt_added:
         menu.addSeparator()
         menu.addAction(_(
@@ -842,7 +841,7 @@ class CoverView(QWidget):  # {{{
         try:
             self.pwidth, self.pheight = fit_image(pwidth, pheight,
                             self.rect().width(), self.rect().height())[1:]
-        except:
+        except Exception:
             self.pwidth, self.pheight = self.rect().width()-1, \
                     self.rect().height()-1
         self.current_pixmap_size = QSize(self.pwidth, self.pheight)
@@ -869,13 +868,11 @@ class CoverView(QWidget):  # {{{
         canvas_size = self.rect()
         width = self.current_pixmap_size.width()
         extrax = canvas_size.width() - width
-        if extrax < 0:
-            extrax = 0
+        extrax = max(extrax, 0)
         x = int(extrax//2)
         height = self.current_pixmap_size.height()
         extray = canvas_size.height() - height
-        if extray < 0:
-            extray = 0
+        extray = max(extray, 0)
         y = int(extray//2)
         target = QRect(x, y, width, height)
         p = QPainter(self)
@@ -1055,7 +1052,7 @@ class CoverView(QWidget):  # {{{
     def update_tooltip(self, current_path):
         try:
             sz = self.pixmap.size()
-        except:
+        except Exception:
             sz = QSize(0, 0)
         self.setToolTip(
             '<p>'+_('Double click to open the Book details window') +
@@ -1302,7 +1299,7 @@ class DetailsLayout(QSplitter):  # {{{
         mh = min(int(r.height()//2), int(4/3 * r.width())+1)
         try:
             ph = self._children[0].pixmap.height()
-        except:
+        except Exception:
             ph = 0
         if ph > 0:
             mh = min(mh, ph)
@@ -1314,7 +1311,7 @@ class DetailsLayout(QSplitter):  # {{{
         mw = 1 + int(3/4 * r.height())
         try:
             pw = self._children[0].pixmap.width()
-        except:
+        except Exception:
             pw = 0
         if pw > 0:
             mw = min(mw, pw)
@@ -1569,6 +1566,10 @@ class BookDetails(DetailsLayout, DropMixin):  # {{{
         self.show_book_info.emit()
 
     def show_data(self, data):
+        from calibre.gui2.ui import get_gui
+
+        if getattr(data, 'book_display_info_is_from_device', False) and (gui := get_gui()) and gui.current_view is gui.library_view:
+            return
         try:
             self.last_data = {'title':data.title, 'authors':data.authors, 'book_id': getattr(data, 'id', None)}
         except Exception:

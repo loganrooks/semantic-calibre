@@ -9,7 +9,6 @@ import os
 
 from calibre import prints
 from calibre.utils.date import DEFAULT_DATE, isoformat
-from polyglot.builtins import itervalues
 
 
 class SchemaUpgrade:
@@ -30,7 +29,7 @@ class SchemaUpgrade:
                     prints(f'Upgrading database to version {uv + 1}...')
                     meth()
                     self.db.execute(f'pragma user_version={uv + 1}')
-        except:
+        except Exception:
             self.db.execute('ROLLBACK')
             raise
         else:
@@ -297,7 +296,7 @@ class SchemaUpgrade:
                 ''')
             self.db.execute(script)
 
-        for field in itervalues(self.field_metadata):
+        for field in self.field_metadata.values():
             if field['is_category'] and not field['is_custom'] and 'link_column' in field:
                 table = self.db.get(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
@@ -372,7 +371,7 @@ class SchemaUpgrade:
                 '''
             self.db.execute(script)
 
-        for field in itervalues(self.field_metadata):
+        for field in self.field_metadata.values():
             if field['is_category'] and not field['is_custom'] and 'link_column' in field:
                 table = self.db.get(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name=?",

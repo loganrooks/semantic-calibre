@@ -83,7 +83,6 @@ def find_portable_library():
         lib = None
         q = os.path.basename(lp)
         for c in candidates:
-            c = c
             if c.lower() == q.lower():
                 lib = os.path.join(base, c)
                 break
@@ -177,7 +176,7 @@ def get_library_path(gui_runner):
     if not os.path.exists(library_path):
         try:
             os.makedirs(library_path)
-        except:
+        except Exception:
             gui_runner.show_error(_('Failed to create library'),
                     _('Failed to create calibre library at: %r.\n'
                       'You will be asked to choose a new library location.')%library_path,
@@ -297,7 +296,7 @@ class GuiRunner(QObject):
             try:
                 self.library_path = candidate
                 db = LibraryDatabase(candidate)
-            except:
+            except Exception:
                 self.show_error(_('Bad database location'), _(
                     'Bad database location %r. calibre will now quit.')%self.library_path,
                     det_msg=traceback.format_exc())
@@ -343,7 +342,7 @@ class GuiRunner(QObject):
                     return
                 if repair_library(self.library_path):
                     db = LibraryDatabase(self.library_path)
-        except:
+        except Exception:
             self.show_error(_('Bad database location'),
                     _('Bad database location %r. Will start with '
                     ' a new, empty calibre library')%self.library_path,
@@ -419,12 +418,11 @@ def run_gui_(opts, args, app, gui_debug=None):
         after_quit_actions['restart_after_quit'] = True
         after_quit_actions['debug_on_restart'] = getattr(runner.main, 'debug_on_restart', False) or gui_debug is not None
         after_quit_actions['no_plugins_on_restart'] = getattr(runner.main, 'no_plugins_on_restart', False)
-    else:
-        if iswindows:
-            try:
-                runner.main.system_tray_icon.hide()
-            except:
-                pass
+    elif iswindows:
+        try:
+            runner.main.system_tray_icon.hide()
+        except Exception:
+            pass
     if getattr(runner.main, 'gui_debug', None) is not None:
         debugfile = runner.main.gui_debug
         from calibre.gui2 import open_local_file

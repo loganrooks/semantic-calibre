@@ -11,7 +11,6 @@ from qt.core import QToolButton
 from calibre.gui2.actions import InterfaceAction
 from calibre.startup import connect_lambda
 from calibre.utils.icu import lower as icu_lower
-from polyglot.builtins import string_or_bytes
 
 
 class SimilarBooksAction(InterfaceAction):
@@ -79,12 +78,17 @@ class SimilarBooksAction(InterfaceAction):
             # back to the default
             if col not in mi.all_field_keys():
                 col = db.prefs.defaults[key]
-            val = mi.get(col, None)
+            val = db.new_api.split_if_is_multiple_composite(col, mi.get(col, None))
         if not val:
             return
 
-        if isinstance(val, string_or_bytes):
+        if isinstance(val, (str, bytes)):
             val = [val]
+        if typ == 'authors':
+            import re
+            def remove_et_al(au):
+                return re.sub(r'\s+et al\.$', '', au)
+            val = list(map(remove_et_al, val))
         search = [col + ':"='+t.replace('"', '\\"')+'"' for t in val]
         if search:
             self.gui.search.set_search_string(join.join(search),

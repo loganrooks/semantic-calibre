@@ -80,7 +80,7 @@ def encode_number_as_hex(num):
     The bytes that follow are simply the hexadecimal representation of the
     number.
     '''
-    num = hex(num)[2:].upper().encode('ascii')
+    num = f'{num:X}'.encode('ascii')
     nlen = len(num)
     if nlen % 2 != 0:
         num = b'0'+num
@@ -462,7 +462,7 @@ def read_font_record(data, extent=1040):
     try:
         usize, flags, dstart, xor_len, xor_start = struct.unpack_from(
                 b'>LLLLL', data, 4)
-    except:
+    except Exception:
         ans['err'] = 'Failed to read font record header fields'
         return ans
     font_data = data[dstart:]

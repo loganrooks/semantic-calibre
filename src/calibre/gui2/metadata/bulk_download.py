@@ -18,7 +18,6 @@ from calibre.ptempfile import PersistentTemporaryDirectory, PersistentTemporaryF
 from calibre.startup import connect_lambda
 from calibre.utils.ipc.simple_worker import WorkerError, fork_job
 from calibre.utils.localization import ngettext
-from polyglot.builtins import iteritems
 
 # Start download {{{
 
@@ -199,14 +198,14 @@ class Notifier(Thread):
         while self.keep_going:
             try:
                 names = os.listdir(self.tdir)
-            except:
+            except Exception:
                 pass
             else:
                 for x in names:
                     if x.endswith('.log'):
                         try:
                             book_id = int(x.partition('.')[0])
-                        except:
+                        except Exception:
                             continue
                         if book_id not in self.seen and book_id in self.title_map:
                             self.seen.add(book_id)
@@ -244,8 +243,7 @@ def download(all_ids, tf, db, do_identify, covers, ensure_fields,
             for i in ids:
                 title_map[i] = metadata[i].title
                 lm_map[i] = metadata[i].last_modified
-            metadata = {i:metadata_to_opf(mi, default_lang='und') for i, mi in
-                    iteritems(metadata)}
+            metadata = {i:metadata_to_opf(mi, default_lang='und') for i, mi in metadata.items()}
             try:
                 ret = fork_job('calibre.ebooks.metadata.sources.worker', 'main',
                         (do_identify, covers, metadata, ensure_fields, tdir),

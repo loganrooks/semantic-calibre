@@ -135,16 +135,24 @@
 		"needs_c++": "17"
     },
     {
+        "name": "piper",
+        "sources": "calibre/utils/tts/piper.cpp",
+		"needs_c++": "17",
+        "libraries": "!piper_libs",
+        "lib_dirs": "!piper_lib_dirs",
+        "inc_dirs": "!piper_inc_dirs"
+    },
+    {
         "name": "html_as_json",
         "sources": "calibre/srv/html_as_json.cpp",
 		"needs_c++": "11"
     },
     {
         "name": "fast_css_transform",
-        "headers": "calibre/utils/cpp_binding.h calibre/utils/stb_sprintf.h",
+        "headers": "calibre/utils/cpp_binding.h",
         "sources": "calibre/srv/fast_css_transform.cpp",
 		"inc_dirs": "perfect-hashing",
-		"needs_c++": "14"
+		"needs_c++": "17"
     },
     {
         "name": "fast_html_entities",

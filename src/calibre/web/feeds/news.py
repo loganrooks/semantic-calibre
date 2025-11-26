@@ -33,7 +33,6 @@ from calibre.web.feeds import Feed, feed_from_xml, feeds_from_index, templates
 from calibre.web.fetch.simple import AbortArticle, RecursiveFetcher
 from calibre.web.fetch.simple import option_parser as web2disk_option_parser
 from calibre.web.fetch.utils import prepare_masthead_image
-from polyglot.builtins import string_or_bytes
 
 
 def classes(classes):
@@ -671,7 +670,7 @@ class BasicNewsRecipe(Recipe):
         if self.auto_cleanup:
             try:
                 raw_html = self.extract_readable_article(raw_html, url)
-            except:
+            except Exception:
                 self.log.exception(f'Auto cleanup of URL: {url!r} failed')
 
         return raw_html
@@ -782,9 +781,10 @@ class BasicNewsRecipe(Recipe):
         Extracts main article content from 'html', cleans up and returns as a (article_html, extracted_title) tuple.
         Based on the original readability algorithm by Arc90.
         '''
-        from lxml.html import document_fromstring, fragment_fromstring, tostring
+        from lxml.html import tostring
 
         from calibre.ebooks.readability import readability
+        from calibre.utils.xml_parse import document_fromstring, fragment_fromstring
 
         doc = readability.Document(html, self.log, url=url,
                 keep_elements=self.auto_cleanup_keep)
@@ -793,7 +793,7 @@ class BasicNewsRecipe(Recipe):
 
         try:
             frag = fragment_fromstring(article_html)
-        except:
+        except Exception:
             doc = document_fromstring(article_html)
             frag = doc.xpath('//body')[-1]
         if frag.tag == 'html':
@@ -1104,7 +1104,7 @@ class BasicNewsRecipe(Recipe):
             url, f, a, feed_len = job_info
             try:
                 article = self.feed_objects[f].articles[a]
-            except:
+            except Exception:
                 self.log.exception('Failed to get article object for postprocessing')
             else:
                 self.populate_article_metadata(article, ans, first_fetch)
@@ -1145,7 +1145,7 @@ class BasicNewsRecipe(Recipe):
             lang = self.language.replace('_', '-').partition('-')[0].lower()
             if lang == 'und':
                 lang = None
-        except:
+        except Exception:
             lang = None
         return lang
 
@@ -1203,7 +1203,7 @@ class BasicNewsRecipe(Recipe):
                             self.image_counter += 1
                             feed.image_url = img
                             self.image_map[feed.image_url] = img
-                        except:
+                        except Exception:
                             pass
             if isinstance(feed.image_url, bytes):
                 feed.image_url = feed.image_url.decode(sys.getfilesystemencoding(), 'strict')
@@ -1350,7 +1350,7 @@ class BasicNewsRecipe(Recipe):
                     url = self.print_version(article.url)
                 except NotImplementedError:
                     url = article.url
-                except:
+                except Exception:
                     self.log.exception('Failed to find print version for: '+article.url)
                     url = None
                 if not url:
@@ -1440,7 +1440,7 @@ class BasicNewsRecipe(Recipe):
         self.cover_path = None
         try:
             self._download_cover()
-        except:
+        except Exception:
             self.log.exception('Failed to download cover')
             self.cover_path = None
 
@@ -1472,14 +1472,14 @@ class BasicNewsRecipe(Recipe):
     def download_masthead(self, url):
         try:
             self._download_masthead(url)
-        except:
+        except Exception:
             self.log.exception('Failed to download supplied masthead_url')
 
     def resolve_masthead(self):
         self.masthead_path = None
         try:
             murl = self.get_masthead_url()
-        except:
+        except Exception:
             self.log.exception('Failed to get masthead url')
             murl = None
 
@@ -1492,7 +1492,7 @@ class BasicNewsRecipe(Recipe):
             self.masthead_path = os.path.join(self.output_dir, 'mastheadImage.jpg')
             try:
                 self.default_masthead_image(self.masthead_path)
-            except:
+            except Exception:
                 self.log.exception('Failed to generate default masthead image')
                 self.masthead_path = None
 
@@ -1508,7 +1508,7 @@ class BasicNewsRecipe(Recipe):
             img_data = create_cover(title, [date])
             cover_file.write(img_data)
             cover_file.flush()
-        except:
+        except Exception:
             self.log.exception('Failed to generate default cover')
             return False
         return True
@@ -1750,7 +1750,7 @@ class BasicNewsRecipe(Recipe):
         parsed_feeds = []
         br = self.browser
         for obj in feeds:
-            if isinstance(obj, string_or_bytes):
+            if isinstance(obj, (str, bytes)):
                 title, url = None, obj
             else:
                 title, url = obj
@@ -1811,7 +1811,7 @@ class BasicNewsRecipe(Recipe):
         '''
         if tag is None:
             return ''
-        if isinstance(tag, string_or_bytes):
+        if isinstance(tag, (str, bytes)):
             return tag
         if callable(getattr(tag, 'xpath', None)) and not hasattr(tag, 'contents'):  # a lxml tag
             from lxml.etree import tostring
@@ -1984,6 +1984,6 @@ class CalibrePeriodical(BasicNewsRecipe):
             recipe = compile_recipe(open(glob('*.recipe')[0],
                 'rb').read())
             self.conversion_options = recipe.conversion_options
-        except:
+        except Exception:
             self.log.exception('Failed to compile downloaded recipe')
         return os.path.abspath('index.html')

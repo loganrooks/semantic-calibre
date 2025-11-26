@@ -4,6 +4,7 @@
 
 import glob
 import io
+import json
 import os
 import shlex
 import subprocess
@@ -11,7 +12,7 @@ import sys
 import tarfile
 import time
 from tempfile import NamedTemporaryFile
-from urllib.request import urlopen
+from urllib.request import Request
 
 _plat = sys.platform.lower()
 ismacos = 'darwin' in _plat
@@ -20,6 +21,21 @@ iswindows = 'win32' in _plat or 'win64' in _plat
 
 def setenv(key, val):
     os.environ[key] = os.path.expandvars(val)
+
+
+def download_with_retry(url, count=5):
+    from urllib.request import urlopen
+    while count > 0:
+        count -= 1
+        try:
+            print('Downloading', url, flush=True)
+            with urlopen(url) as f:
+                return f.read()
+        except Exception:
+            if count <= 0:
+                raise
+            print('Download failed retrying...')
+            time.sleep(1)
 
 
 if ismacos:
@@ -43,6 +59,7 @@ if ismacos:
         if old:
             old += ':'
         setenv('DYLD_FALLBACK_LIBRARY_PATH', old + '$SW/lib')
+        setenv('CALIBRE_ESPEAK_DATA_DIR', '$SW/share/espeak-ng-data')
 else:
 
     SWBASE = '/sw'
@@ -57,6 +74,7 @@ else:
         setenv('PKG_CONFIG_PATH', '$SW/lib/pkgconfig')
         setenv('QMAKE', '$SW/qt/bin/qmake')
         setenv('CALIBRE_QT_PREFIX', '$SW/qt')
+        setenv('CALIBRE_ESPEAK_DATA_DIR', '$SW/share/espeak-ng-data')
 
 
 def run(*args, timeout=600):
@@ -121,10 +139,99 @@ def install_linux_deps():
 def get_tx():
     url = 'https://github.com/transifex/cli/releases/latest/download/tx-linux-amd64.tar.gz'
     print('Downloading:', url)
-    with urlopen(url) as f:
-        raw = f.read()
+    raw = download_with_retry(url)
     with tarfile.open(fileobj=io.BytesIO(raw), mode='r') as tf:
         tf.extract('tx')
+
+
+def install_grype() -> str:
+    dest = '/tmp'
+    rq = Request('https://api.github.com/repos/anchore/grype/releases/latest', headers={
+        'Accept': 'application/vnd.github.v3+json',
+    })
+    m = json.loads(download_with_retry(rq))
+    for asset in m['assets']:
+        if asset['name'].endswith('_linux_amd64.tar.gz'):
+            url = asset['browser_download_url']
+            break
+    else:
+        raise ValueError('Could not find linux binary for grype')
+    os.makedirs(dest, exist_ok=True)
+    data = download_with_retry(url)
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r') as tf:
+        tf.extract('grype', path=dest, filter='fully_trusted')
+    exe = os.path.join(dest, 'grype')
+    subprocess.check_call([exe, 'db', 'update'])
+    return exe
+
+
+IGNORED_DEPENDENCY_CVES = [
+    # Python stdlib
+    'CVE-2025-8194',  # DoS in tarfile
+    'CVE-2025-6069',  # DoS in HTMLParser
+    # glib
+    'CVE-2025-4056',  # Only affects Windows, on which we dont use glib
+    # libtiff
+    'CVE-2025-8851',  # this is erroneously marked as fixed in the database but no release of libtiff has been made with the fix
+    # hyphen
+    'CVE-2017-1000376',  # false match in the database
+    # espeak
+    'CVE-2023-4990',  # false match because we currently build with a specific commit pending release of espeak 1.53
+    # Qt
+    'CVE-2025-5683',  # we dont use the ICNS image format
+    # ffmpeg cannot be updated till Qt starts using FFMPEG 8 and these CVEs are
+    # anyway for file types we dont use or support
+    'CVE-2025-59733', 'CVE-2025-59731', 'CVE-2025-59732',  # OpenEXR image files, not supported by calibre
+    'CVE-2025-59734',  # SANM decoding unused by calibre
+    'CVE-2025-59729',  # DHAV files unused by calibre ad negligible security impact: https://issuetracker.google.com/issues/433513232
+    'CVE-2025-11579',  # Go rardecode package probably from grype's own dependencies calibre does not use Go code
+]
+
+
+LINUX_BUNDLE = 'linux-64'
+MACOS_BUNDLE = 'macos-64'
+WINDOWS_BUNDLE = 'windows-64'
+
+
+def install_bundle(dest=SW, which=''):
+    run('sudo', 'mkdir', '-p', dest)
+    run('sudo', 'chown', '-R', os.environ['USER'], SWBASE)
+    tball = which or (MACOS_BUNDLE if ismacos else LINUX_BUNDLE)
+    download_and_decompress(
+        f'https://download.calibre-ebook.com/ci/calibre7/{tball}.tar.xz', dest
+    )
+
+
+def check_dependencies() -> None:
+    dest = os.path.join(SW, LINUX_BUNDLE)
+    install_bundle(dest, os.path.basename(dest))
+    dest = os.path.join(SW, MACOS_BUNDLE)
+    install_bundle(dest, os.path.basename(dest))
+    dest = os.path.join(SW, WINDOWS_BUNDLE)
+    install_bundle(dest, os.path.basename(dest))
+    grype = install_grype()
+    with open((gc := os.path.expanduser('~/.grype.yml')), 'w') as f:
+        print('ignore:', file=f)
+        for x in IGNORED_DEPENDENCY_CVES:
+            print('  - vulnerability:', x, file=f)
+    cmdline = [grype, '--by-cve', '--config', gc, '--fail-on', 'medium', '--only-fixed', '--add-cpes-if-none']
+    # disable testing against dir as it raises false positives on sqlite
+    # embedded in dependencies we dont use at runtime
+    # print('Testing against the bundle directories', flush=True)
+    # if (cp := subprocess.run(cmdline + ['dir:' + SW])).returncode != 0:
+    #     raise SystemExit(cp.returncode)
+    # Test against the SBOM
+    print('Testing against the SBOM', flush=True)
+    import runpy
+    orig = sys.argv, sys.stdout
+    sys.argv = ['bypy', 'sbom', 'calibre', '1.0.0']
+    buf = io.StringIO()
+    sys.stdout = buf
+    runpy.run_path('bypy-src')
+    sys.argv, sys.stdout = orig
+    print(buf.getvalue())
+    if (cp := subprocess.run(cmdline, input=buf.getvalue().encode())).returncode != 0:
+        raise SystemExit(cp.returncode)
 
 
 def main():
@@ -134,19 +241,16 @@ def main():
         return m['main']()
     action = sys.argv[1]
     if action == 'install':
-        run('sudo', 'mkdir', '-p', SW)
-        run('sudo', 'chown', '-R', os.environ['USER'], SWBASE)
-
-        tball = 'macos-64' if ismacos else 'linux-64'
-        download_and_decompress(
-            f'https://download.calibre-ebook.com/ci/calibre7/{tball}.tar.xz', SW
-        )
+        install_bundle()
         if not ismacos:
             install_linux_deps()
 
     elif action == 'bootstrap':
         install_env()
         run_python('setup.py bootstrap --ephemeral')
+
+    elif action == 'check-dependencies':
+        check_dependencies()
 
     elif action == 'pot':
         transifexrc = '''\

@@ -15,7 +15,22 @@ import traceback
 from collections import defaultdict, namedtuple
 from itertools import groupby
 
-from qt.core import QAbstractTableModel, QApplication, QColor, QFont, QFontMetrics, QIcon, QImage, QModelIndex, QPainter, QPixmap, Qt, pyqtSignal
+from qt.core import (
+    QAbstractTableModel,
+    QApplication,
+    QColor,
+    QDateTime,
+    QFont,
+    QFontMetrics,
+    QIcon,
+    QImage,
+    QLocale,
+    QModelIndex,
+    QPainter,
+    QPixmap,
+    Qt,
+    pyqtSignal,
+)
 
 from calibre import fit_image, human_readable, isbytestring, prepare_string_for_xml, strftime
 from calibre.constants import DEBUG, config_dir, dark_link_color, filesystem_encoding
@@ -34,7 +49,6 @@ from calibre.utils.icu import sort_key
 from calibre.utils.localization import calibre_langcode_to_name, ngettext
 from calibre.utils.resources import get_path as P
 from calibre.utils.search_query_parser import ParseException, SearchQueryParser
-from polyglot.builtins import iteritems, itervalues, string_or_bytes
 
 Counts = namedtuple('Counts', 'library_total total current')
 
@@ -91,7 +105,7 @@ class ColumnColor:  # {{{
             if color.isValid():
                 self.mi = None
                 return color
-        except:
+        except Exception:
             pass
 # }}}
 
@@ -178,7 +192,7 @@ class ColumnIcon:  # {{{
                 icon_bitmap_cache[icon_string] = result
                 self.mi = None
                 return result
-        except:
+        except Exception:
             pass
 # }}}
 
@@ -360,7 +374,7 @@ class BooksModel(QAbstractTableModel):  # {{{
 
         if db:
             style_map = {'bold': self.bold_font, 'bi': self.bi_font, 'italic': self.italic_font}
-            self.styled_columns = {k: style_map.get(v, None) for k, v in iteritems(db.new_api.pref('styled_columns', {}))}
+            self.styled_columns = {k: style_map.get(v, None) for k, v in db.new_api.pref('styled_columns', {}).items()}
         self.alignment_map = {}
         self.ids_to_highlight_set = set()
         self.current_highlighted_idx = None
@@ -496,7 +510,7 @@ class BooksModel(QAbstractTableModel):  # {{{
             return None
         try:
             return self.ids_to_highlight[self.current_highlighted_idx]
-        except:
+        except Exception:
             return None
 
     def get_next_highlighted_id(self, current_row, forward):
@@ -516,7 +530,7 @@ class BooksModel(QAbstractTableModel):  # {{{
                 break
         try:
             self.current_highlighted_idx = self.ids_to_highlight.index(self.id(row_))
-        except:
+        except Exception:
             # This shouldn't happen ...
             return None
         return self.get_current_highlighted_id()
@@ -628,6 +642,7 @@ class BooksModel(QAbstractTableModel):  # {{{
     def get_book_display_info(self, idx):
         mi = self.db.get_metadata(idx)
         mi.size = mi._proxy_metadata.book_size
+        mi.book_display_info_is_from_device = False
         mi.cover_data = ('jpg', self.cover(idx))
         mi.id = self.db.id(idx)
         mi.field_metadata = self.db.field_metadata
@@ -636,7 +651,7 @@ class BooksModel(QAbstractTableModel):  # {{{
         mi.row_number = idx
         try:
             mi.marked = self.db.data.get_marked(idx, index_is_id=False)
-        except:
+        except Exception:
             mi.marked = None
         return mi
 
@@ -755,7 +770,7 @@ class BooksModel(QAbstractTableModel):  # {{{
                             _set_metadata(pt, newmi, format)
                         else:
                             _set_metadata(pt, mi, format)
-                    except:
+                    except Exception:
                         traceback.print_exc()
                 pt.close()
 
@@ -871,16 +886,15 @@ class BooksModel(QAbstractTableModel):  # {{{
                         if val is None:
                             return None
                         return by if val else bn
+                elif m['display'].get('bools_show_icons', True):
+                    def func(idx):
+                        val = force_to_bool(fffunc(field_obj, idfunc(idx)))
+                        if val is None:
+                            return None if bt else bn
+                        return by if val else bn
                 else:
-                    if m['display'].get('bools_show_icons', True):
-                        def func(idx):
-                            val = force_to_bool(fffunc(field_obj, idfunc(idx)))
-                            if val is None:
-                                return None if bt else bn
-                            return by if val else bn
-                    else:
-                        def func(idx):
-                            return None
+                    def func(idx):
+                        return None
             elif field == 'size':
                 sz_mult = 1/(1024**2)
 
@@ -913,21 +927,19 @@ class BooksModel(QAbstractTableModel):  # {{{
                         else:
                             def func(idx):
                                 return (fffunc(field_obj, idfunc(idx), default_value=''))
+                    elif do_sort:
+                        def func(idx):
+                            return (jv.join(sorted(fffunc(field_obj, idfunc(idx), default_value=()), key=sort_key)))
                     else:
-                        if do_sort:
-                            def func(idx):
-                                return (jv.join(sorted(fffunc(field_obj, idfunc(idx), default_value=()), key=sort_key)))
-                        else:
-                            def func(idx):
-                                return (jv.join(fffunc(field_obj, idfunc(idx), default_value=())))
+                        def func(idx):
+                            return (jv.join(fffunc(field_obj, idfunc(idx), default_value=())))
+                elif dt in {'text', 'composite', 'enumeration'} and m['display'].get('use_decorations', False):
+                    def func(idx):
+                        text = fffunc(field_obj, idfunc(idx))
+                        return (text) if force_to_bool(text) is None else None
                 else:
-                    if dt in {'text', 'composite', 'enumeration'} and m['display'].get('use_decorations', False):
-                        def func(idx):
-                            text = fffunc(field_obj, idfunc(idx))
-                            return (text) if force_to_bool(text) is None else None
-                    else:
-                        def func(idx):
-                            return fffunc(field_obj, idfunc(idx), default_value='')
+                    def func(idx):
+                        return fffunc(field_obj, idfunc(idx), default_value='')
             elif dt == 'datetime':
                 def func(idx):
                     val = fffunc(field_obj, idfunc(idx), default_value=UNDEFINED_DATE)
@@ -1003,10 +1015,44 @@ class BooksModel(QAbstractTableModel):  # {{{
                                                      self.db.id(idx))
             return f
 
-        for f, allow_half in iteritems(rating_fields):
+        def template_tooltip(key, orig_tt_func):
+            def f(idx):
+                try:
+                    template = self.db.new_api.pref('column_tooltip_templates', {}).get(key, '')
+                    # Simulate what Qt does to get the text for non-string data
+                    # types so that idx.data(Qt.ItemDataRole.ToolTipRole)
+                    # always returns a string.
+                    orig_obj = orig_tt_func(idx)
+                    match orig_obj:
+                        case None:
+                            v = ''
+                        case str():
+                            v = orig_obj
+                        case bool():
+                            v = str(orig_obj)
+                        case int() | float() | QDateTime():
+                            v = QLocale().toString(orig_obj)
+                        case _:
+                            v = f'unsupported type {type(orig_obj)}'
+                    if template:
+                        global_vars = {'column_lookup_name': key, 'original_text': v}
+                        mi = self.db.new_api.get_proxy_metadata(self.db.data.index_to_id(idx))
+                        return self.formatter.safe_format(
+                                template, {}, _('tooltip template error'), mi, global_vars=global_vars)
+                    return v
+                except Exception as e:
+                    return str(e)
+            return f
+
+        for f, allow_half in rating_fields.items():
             tc[f] = stars_tooltip(self.dc[f], allow_half)
         for f in bool_fields:
             tc[f] = bool_tooltip(f)
+        # Make all columns use the template tooltip renderer. This avoids the
+        # "first time" problem where a template tooltip is added but not
+        # used until calibre is restarted
+        for f in self.column_map:
+            tc[f] = template_tooltip(f, tc[f])
         # build a index column to data converter map, to remove the string lookup in the data loop
         self.column_to_dc_map = [self.dc[col] for col in self.column_map]
         self.column_to_tc_map = [tc[col] for col in self.column_map]
@@ -1081,7 +1127,7 @@ class BooksModel(QAbstractTableModel):  # {{{
                         if color.isValid():
                             self.column_color.mi = None
                             return (color)
-                    except:
+                    except Exception:
                         pass
 
             if self.color_row_fmt_cache is None:
@@ -1133,6 +1179,8 @@ class BooksModel(QAbstractTableModel):  # {{{
         elif role == Qt.ItemDataRole.FontRole and self.styled_columns:
             cname = self.column_map[index.column()]
             return self.styled_columns.get(cname)
+        elif role == Qt.ItemDataRole.UserRole:
+            return self.id(index)
         # elif role == Qt.ItemDataRole.ToolTipRole and index.isValid():
         #     if self.column_map[index.column()] in self.editable_cols:
         #         return (_("Double click to <b>edit</b> me<br><br>"))
@@ -1284,7 +1332,7 @@ class BooksModel(QAbstractTableModel):  # {{{
                 error_dialog(get_gui(), _('Failed to set data'),
                         _('Could not set data, click "Show details" to see why.'),
                         det_msg=traceback.format_exc(), show=True)
-            except:
+            except Exception:
                 import traceback
                 traceback.print_exc()
                 error_dialog(get_gui(), _('Failed to set data'),
@@ -1434,7 +1482,7 @@ class OnDeviceSearch(SearchQueryParser):  # {{{
                     vals = accessor(row)
                     if vals is None:
                         vals = ''
-                    if isinstance(vals, string_or_bytes):
+                    if isinstance(vals, (str, bytes)):
                         vals = vals.split(',') if locvalue == 'collections' else [vals]
                     if _match(query, vals, m, use_primary_find_in_search=upf):
                         matches.add(index)
@@ -1513,7 +1561,7 @@ class DeviceBooksModel(BooksModel):  # {{{
         idx = None
         try:
             idx = self.db.index(item)
-        except:
+        except Exception:
             path = getattr(item, 'path', None)
             if path:
                 for i, x in enumerate(self.db):
@@ -1552,7 +1600,7 @@ class DeviceBooksModel(BooksModel):  # {{{
             return False
 
         path = getattr(item, 'path', None)
-        for items in itervalues(self.marked_for_deletion):
+        for items in self.marked_for_deletion.values():
             for x in items:
                 if x is item or (path and path == getattr(x, 'path', None)):
                     return True
@@ -1622,14 +1670,14 @@ class DeviceBooksModel(BooksModel):  # {{{
                 ax = self.db[x].author_sort
                 if not ax:
                     raise Exception('')
-            except:
+            except Exception:
                 try:
                     ax = authors_to_string(self.db[x].authors)
-                except:
+                except Exception:
                     ax = ''
             try:
                 return sort_key(ax)
-            except:
+            except Exception:
                 return ax
 
         keygen = {
@@ -1722,6 +1770,7 @@ class DeviceBooksModel(BooksModel):  # {{{
         mi.device_collections = list(item.device_collections)
         mi.tags = list(getattr(item, 'tags', []))
         mi.comments = getattr(item, 'comments', None)
+        mi.book_display_info_is_from_device = True
         series = getattr(item, 'series', None)
         if series:
             sidx = getattr(item, 'series_index', 0)
@@ -1807,7 +1856,7 @@ class DeviceBooksModel(BooksModel):  # {{{
     def data(self, index, role):
         row, col = index.row(), index.column()
         cname = self.column_map[col]
-        if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
+        if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
             if cname == 'title':
                 text = self.db[self.map[row]].title
                 if not text:
