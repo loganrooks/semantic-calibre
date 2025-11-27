@@ -67,6 +67,12 @@ See [docs/ISSUES.md](docs/ISSUES.md) for design decisions.
 
 **Status:** In Progress
 
+### In Progress
+- [ ] **On-Demand Indexing**
+  - Remove auto-index default
+  - `index_book(book_id, profile_id)` method
+  - Index status checking
+
 ### Completed
 - [x] Design decisions documented (DD-001 through DD-005)
 - [x] Calibre AI integration guide written
@@ -81,22 +87,17 @@ See [docs/ISSUES.md](docs/ISSUES.md) for design decisions.
   - `BookIndexStatus` tracking (which books in which profiles)
   - `ProfileManager` class with CRUD operations
   - Database schema for profiles and book status
-
-### In Progress
-- [ ] **SQLite-vec Profile Integration**
-  - Per-profile vector storage
-  - Profile-aware search
-
-- [ ] **SemanticSearchEngine Profile Support**
-  - Profile-aware indexing
+- [x] **SQLite-vec Profile Integration**
+  - Per-profile vector storage with `profile_id` parameter
+  - Profile-aware search isolated by namespace
+  - Migration from v1 (no profile) to v2 schema
+- [x] **SemanticSearchEngine Profile Support**
+  - Profile-aware indexing (`index_text`, `index_book_content`, `index_epub`)
   - Profile selection for search
+  - Profile listing with `get_profiles()`
+  - Profile-specific clearing with `clear(profile_id)`
 
 ### Planned
-- [ ] **On-Demand Indexing**
-  - Remove auto-index default
-  - `index_book(book_id, profile_id)` method
-  - Index status checking
-
 - [ ] **OpenAI Embedding Support**
   - Add `embed()` to `src/calibre/ai/openai/backend.py`
 
