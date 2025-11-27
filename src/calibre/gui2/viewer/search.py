@@ -31,12 +31,79 @@ from calibre.ebooks.conversion.search_replace import REGEX_FLAGS
 from calibre.gui2 import error_dialog, warning_dialog
 from calibre.gui2.gestures import GestureManager
 from calibre.gui2.progress_indicator import ProgressIndicator
-from calibre.gui2.viewer import get_boss
+from calibre.gui2.viewer import get_boss, get_current_book_data
 from calibre.gui2.viewer.config import vprefs
-from calibre.gui2.viewer.web_view import get_data, get_manifest
+from calibre.gui2.viewer.web_view import get_data, get_manifest, set_book_path
 from calibre.gui2.viewer.widgets import ResultsDelegate, SearchBox
 from calibre.utils.icu import primary_collator_without_punctuation
 from calibre.utils.localization import _, ngettext
+
+# Semantic search integration flag
+SEMANTIC_SEARCH_AVAILABLE = False
+try:
+    from calibre_semantic.viewer import search_viewer_book, is_book_indexed
+    SEMANTIC_SEARCH_AVAILABLE = True
+except ImportError:
+    pass
+
+
+def semantic_search_in_book(search_query, spine_names, get_text_func, book_path):
+    """Perform semantic search across the entire book.
+
+    Args:
+        search_query: Search object with .text attribute
+        spine_names: List of spine item names
+        get_text_func: Function to get text for a spine name
+        book_path: Path to the book file
+
+    Yields:
+        Tuples of (before, text, after, offset, spine_idx, spine_name)
+    """
+    if not SEMANTIC_SEARCH_AVAILABLE:
+        return
+
+    # Build spine_items list for indexing
+    spine_items = []
+    for name in spine_names:
+        try:
+            text = get_text_func(name)
+            spine_items.append((name, text))
+        except Exception:
+            continue
+
+    if not spine_items:
+        return
+
+    # Search using calibre_semantic
+    try:
+        results = search_viewer_book(
+            query=search_query.text,
+            book_path=book_path,
+            spine_items=spine_items,
+            auto_index=True,
+            limit=50,
+            min_score=0.3,
+            ctx_size=75,
+        )
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        return
+
+    # Create name to index mapping
+    name_to_idx = {name: idx for idx, name in enumerate(spine_names)}
+
+    # Yield results in the expected format
+    for result in results:
+        spine_idx = name_to_idx.get(result.spine_name, result.spine_idx)
+        yield (
+            result.before,
+            result.text,
+            result.after,
+            result.offset,
+            spine_idx,
+            result.spine_name or spine_names[spine_idx] if spine_idx < len(spine_names) else '',
+        )
 
 
 class BusySpinner(QWidget):  # {{{
@@ -173,6 +240,12 @@ class Search:
             except Exception as e:
                 error_dialog(gui, _('Invalid search expression'), _(
                     'The search expression {} is not a valid regex.').format(self.text), det_msg=str(e), show=True)
+                return False
+        elif self.mode == 'semantic':
+            if not SEMANTIC_SEARCH_AVAILABLE:
+                error_dialog(gui, _('Semantic search not available'), _(
+                    'Semantic search requires the calibre-semantic library to be installed. '
+                    'Please install it with: pip install calibre-semantic'), show=True)
                 return False
         return True
 
@@ -489,6 +562,7 @@ class SearchInput(QWidget):  # {{{
         qt.addItem(_('Whole words'), 'word')
         qt.addItem(_('Nearby words'), 'near')
         qt.addItem(_('Regex'), 'regex')
+        qt.addItem(_('Semantic'), 'semantic')
         qt.setToolTip('<p>' + _(
             'Choose the type of search: <ul>'
             '<li><b>Contains</b> will search for the entered text anywhere. It will ignore punctuation,'
@@ -501,6 +575,8 @@ class SearchInput(QWidget):  # {{{
             ' the list of words, for example: <i>calibre cool awesome 120</i> will search for <i>calibre</i>, <i>cool</i>'
             ' and <i>awesome</i> within 120 characters of each other.'
             '<li><b>Regex</b> will interpret the text as a regular expression.'
+            '<li><b>Semantic</b> will search by meaning, finding passages conceptually related to your query.'
+            ' This uses AI embeddings and may take longer on first use while the book is indexed.'
         ))
         qt.setCurrentIndex(qt.findData(vprefs.get(f'viewer-{self.panel_name}-mode', 'normal') or 'normal'))
         qt.currentIndexChanged.connect(self.save_search_type)
@@ -853,6 +929,36 @@ class SearchPanel(QWidget):  # {{{
             if spine_idx < 0:
                 self.results_found.emit(SearchFinished(search_query))
                 continue
+
+            # Handle semantic search mode differently
+            if search_query.mode == 'semantic' and SEMANTIC_SEARCH_AVAILABLE:
+                result_num = 0
+                counter = Counter()
+                try:
+                    # Get book path for indexing
+                    book_path = getattr(set_book_path, 'pathtoebook', None)
+                    if book_path:
+                        # Define text getter function
+                        def get_text(name):
+                            return searchable_text_for_name(name)[0]
+
+                        # Perform semantic search
+                        for result in semantic_search_in_book(search_query, spine, get_text, book_path):
+                            before, text, after, offset, idx, name = result
+                            q = (before or '')[-15:] + text + (after or '')[:15]
+                            result_num += 1
+                            self.results_found.emit(SearchResult(
+                                search_query, before, text, after, q, name, idx,
+                                counter[q], offset, result_num
+                            ))
+                            counter[q] += 1
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
+                self.results_found.emit(SearchFinished(search_query))
+                continue
+
+            # Standard search: iterate through spine items
             num_in_spine = len(spine)
             result_num = 0
             for n in range(num_in_spine):
