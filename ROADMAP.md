@@ -70,32 +70,35 @@ See [docs/ISSUES.md](docs/ISSUES.md) for design decisions.
 ### Completed
 - [x] Design decisions documented (DD-001 through DD-005)
 - [x] Calibre AI integration guide written
-
-### In Progress
-- [ ] **Calibre AI Embedding Functions**
+- [x] **Calibre AI Embedding Functions**
   - Add `embed()` to `src/calibre/ai/google/backend.py`
-  - Add `embed()` to `src/calibre/ai/openai/backend.py`
   - Support configurable dimensions (256, 768, 3072)
-
-- [ ] **Update CalibreAIAdapter**
+- [x] **Update CalibreAIAdapter**
   - Use native Calibre AI embedding functions
   - Proper fallback chain to sentence-transformers
-
-### Planned
-- [ ] **Embedding Profiles** (`core/profiles.py`)
+- [x] **Embedding Profiles** (`core/profiles.py`)
   - `EmbeddingProfile` dataclass (provider, model, dimension, index strategy)
   - `BookIndexStatus` tracking (which books in which profiles)
-  - Profile manager with CRUD operations
+  - `ProfileManager` class with CRUD operations
+  - Database schema for profiles and book status
 
-- [ ] **Database Schema Updates**
-  - `embedding_profiles` table
-  - `book_index_status` table
+### In Progress
+- [ ] **SQLite-vec Profile Integration**
   - Per-profile vector storage
+  - Profile-aware search
 
+- [ ] **SemanticSearchEngine Profile Support**
+  - Profile-aware indexing
+  - Profile selection for search
+
+### Planned
 - [ ] **On-Demand Indexing**
   - Remove auto-index default
   - `index_book(book_id, profile_id)` method
   - Index status checking
+
+- [ ] **OpenAI Embedding Support**
+  - Add `embed()` to `src/calibre/ai/openai/backend.py`
 
 ---
 

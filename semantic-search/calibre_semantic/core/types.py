@@ -8,6 +8,7 @@ loose coupling and easy testing through dependency injection.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Sequence, runtime_checkable
@@ -39,6 +40,30 @@ class ChunkType(Enum):
     SECTION = "section"
     PAGE = "page"
     SENTENCE = "sentence"
+
+
+class IndexStrategy(Enum):
+    """Vector index strategy for search.
+
+    Different strategies have different trade-offs:
+    - FLAT: Exact search, O(n), best for <50k vectors
+    - HNSW: Approximate, O(log n), good for 50k-10M vectors
+    - IVF: Approximate with clustering, good for >1M vectors
+    """
+
+    FLAT = "flat"
+    HNSW = "hnsw"
+    IVF = "ivf"
+
+
+class IndexStatus(Enum):
+    """Status of a book's indexing in a profile."""
+
+    PENDING = "pending"
+    INDEXING = "indexing"
+    COMPLETE = "complete"
+    FAILED = "failed"
+    STALE = "stale"  # Book modified after indexing
 
 
 # =============================================================================
@@ -399,6 +424,144 @@ class SemanticSearchConfig:
             "index_on_add": self.index_on_add,
             "background_indexing": self.background_indexing,
         }
+
+
+# =============================================================================
+# Embedding Profiles
+# =============================================================================
+
+
+@dataclass
+class EmbeddingProfile:
+    """A named embedding configuration for indexing books.
+
+    Profiles allow users to create multiple embedding configurations
+    with different providers, models, and dimensions. Books can be
+    indexed into one or more profiles.
+
+    Important: Embeddings from different profiles are NOT compatible.
+    You cannot search across profiles with different providers/models
+    because they exist in different vector spaces.
+
+    Attributes:
+        id: Unique identifier (e.g., "philosophy-gemini-768")
+        name: Human-readable name (e.g., "Philosophy Research")
+        provider: Embedding provider ("google", "openai", "sentence-transformers")
+        model: Model identifier
+        dimension: Embedding vector dimension
+        index_strategy: Vector index strategy (flat, hnsw, ivf)
+        index_options: Strategy-specific configuration
+        created_at: When this profile was created
+        description: Optional description of the profile's purpose
+
+    Example:
+        >>> profile = EmbeddingProfile(
+        ...     id="research-gemini",
+        ...     name="Research Collection",
+        ...     provider="google",
+        ...     model="models/text-embedding-004",
+        ...     dimension=768,
+        ... )
+    """
+
+    id: str
+    name: str
+    provider: str
+    model: str
+    dimension: int
+    index_strategy: IndexStrategy = IndexStrategy.FLAT
+    index_options: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.now)
+    description: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "provider": self.provider,
+            "model": self.model,
+            "dimension": self.dimension,
+            "index_strategy": self.index_strategy.value,
+            "index_options": self.index_options,
+            "created_at": self.created_at.isoformat(),
+            "description": self.description,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EmbeddingProfile:
+        """Create from dictionary."""
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            provider=data["provider"],
+            model=data["model"],
+            dimension=data["dimension"],
+            index_strategy=IndexStrategy(data.get("index_strategy", "flat")),
+            index_options=data.get("index_options", {}),
+            created_at=datetime.fromisoformat(data["created_at"])
+            if isinstance(data.get("created_at"), str)
+            else data.get("created_at", datetime.now()),
+            description=data.get("description"),
+        )
+
+    @property
+    def model_id(self) -> str:
+        """Get unique model identifier for cache invalidation."""
+        return f"{self.provider}:{self.model}:{self.dimension}"
+
+
+@dataclass
+class BookIndexStatus:
+    """Tracks indexing status of a book within a profile.
+
+    Each book can be indexed in multiple profiles. This dataclass
+    tracks the status of each book-profile combination.
+
+    Attributes:
+        book_id: The book being tracked
+        profile_id: The embedding profile
+        status: Current indexing status
+        indexed_at: When indexing completed (if complete)
+        chunk_count: Number of chunks indexed
+        error_message: Error details if status is FAILED
+    """
+
+    book_id: BookIdentifier
+    profile_id: str
+    status: IndexStatus = IndexStatus.PENDING
+    indexed_at: datetime | None = None
+    chunk_count: int = 0
+    error_message: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "book_id": str(self.book_id),
+            "profile_id": self.profile_id,
+            "status": self.status.value,
+            "indexed_at": self.indexed_at.isoformat() if self.indexed_at else None,
+            "chunk_count": self.chunk_count,
+            "error_message": self.error_message,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BookIndexStatus:
+        """Create from dictionary."""
+        book_id = data["book_id"]
+        if isinstance(book_id, str):
+            book_id = BookIdentifier.from_string(book_id)
+
+        return cls(
+            book_id=book_id,
+            profile_id=data["profile_id"],
+            status=IndexStatus(data.get("status", "pending")),
+            indexed_at=datetime.fromisoformat(data["indexed_at"])
+            if data.get("indexed_at")
+            else None,
+            chunk_count=data.get("chunk_count", 0),
+            error_message=data.get("error_message"),
+        )
 
 
 # =============================================================================

@@ -2,14 +2,18 @@
 
 from calibre_semantic.core.types import (
     BookIdentifier,
+    BookIndexStatus,
     BookMetadata,
     ChunkLocation,
     ChunkType,
     ChunkingConfig,
     EmbeddedChunk,
     EmbeddingConfig,
+    EmbeddingProfile,
     EmbeddingProvider,
     IndexingProgress,
+    IndexStatus,
+    IndexStrategy,
     SearchResult,
     SearchResults,
     SemanticSearchConfig,
@@ -25,18 +29,23 @@ from calibre_semantic.core.chunking import (
     SemanticChunkingStrategy,
     FixedSizeChunkingStrategy,
 )
+from calibre_semantic.core.profiles import ProfileManager
 
 __all__ = [
     # Types
     "BookIdentifier",
+    "BookIndexStatus",
     "BookMetadata",
     "ChunkLocation",
     "ChunkType",
     "ChunkingConfig",
     "EmbeddedChunk",
     "EmbeddingConfig",
+    "EmbeddingProfile",
     "EmbeddingProvider",
     "IndexingProgress",
+    "IndexStatus",
+    "IndexStrategy",
     "SearchResult",
     "SearchResults",
     "SemanticSearchConfig",
@@ -51,4 +60,6 @@ __all__ = [
     # Chunking strategies
     "SemanticChunkingStrategy",
     "FixedSizeChunkingStrategy",
+    # Profile management
+    "ProfileManager",
 ]
