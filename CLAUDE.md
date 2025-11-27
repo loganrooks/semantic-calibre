@@ -1,7 +1,7 @@
 # Semantic Calibre - Project Context
 
-> **Current Phase:** 1.5 - Embedding Profiles & Calibre AI Integration
-> **Last Updated:** 2025-01-26
+> **Current Phase:** 2 - Viewer Integration
+> **Last Updated:** 2025-11-27
 
 ## Quick Links
 
@@ -135,8 +135,9 @@ When making significant changes:
 
 ## Testing Notes
 
-- 148+ tests currently passing
+- 203+ tests currently passing
 - 18 tests skipped (require optional dependencies)
+- 1 test failing (pytest-asyncio configuration)
 - Use `python -m pytest` (not bare `pytest`) to ensure imports work
 - See [KI-001, KI-002](docs/ISSUES.md) for skipped test details
 

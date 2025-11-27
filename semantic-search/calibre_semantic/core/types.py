@@ -366,7 +366,7 @@ class SemanticSearchConfig:
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
     default_result_limit: int = 20
     min_similarity_score: float = 0.3
-    index_on_add: bool = True
+    index_on_add: bool = False  # ADR-002: On-demand indexing by default
     background_indexing: bool = True
 
     @classmethod
@@ -393,7 +393,7 @@ class SemanticSearchConfig:
             chunking=ChunkingConfig(**chunking_data),
             default_result_limit=data.get("default_result_limit", 20),
             min_similarity_score=data.get("min_similarity_score", 0.3),
-            index_on_add=data.get("index_on_add", True),
+            index_on_add=data.get("index_on_add", False),  # ADR-002
             background_indexing=data.get("background_indexing", True),
         )
 
@@ -642,29 +642,49 @@ class VectorStore(Protocol):
 
     Defines the interface for storing and searching embedding vectors.
     Implementations might use SQLite-vec, ChromaDB, FAISS, etc.
+
+    Profile Support:
+        All data operations accept an optional profile_id parameter for
+        namespace isolation. This allows storing embeddings from different
+        models or configurations in the same database without conflicts.
     """
 
-    def add(self, chunks: Sequence[EmbeddedChunk]) -> None:
+    def add(
+        self,
+        chunks: Sequence[EmbeddedChunk],
+        profile_id: str | None = None,
+    ) -> None:
         """Add embedded chunks to the store.
 
         Args:
             chunks: Sequence of embedded chunks to store
+            profile_id: Profile namespace (uses default if None)
         """
         ...
 
-    def remove(self, chunk_ids: Sequence[str]) -> None:
+    def remove(
+        self,
+        chunk_ids: Sequence[str],
+        profile_id: str | None = None,
+    ) -> None:
         """Remove chunks by ID.
 
         Args:
             chunk_ids: Sequence of chunk IDs to remove
+            profile_id: Profile namespace (uses default if None)
         """
         ...
 
-    def remove_book(self, book_id: BookIdentifier) -> int:
-        """Remove all chunks for a book.
+    def remove_book(
+        self,
+        book_id: BookIdentifier,
+        profile_id: str | None = None,
+    ) -> int:
+        """Remove all chunks for a book from a profile.
 
         Args:
             book_id: The book whose chunks should be removed
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             Number of chunks removed
@@ -675,15 +695,17 @@ class VectorStore(Protocol):
         self,
         query_embedding: Vector,
         limit: int = 10,
+        profile_id: str | None = None,
         filter_book_ids: Sequence[BookIdentifier] | None = None,
         filter_libraries: Sequence[str] | None = None,
         min_score: float = 0.0,
     ) -> list[tuple[TextChunk, float]]:
-        """Search for similar chunks.
+        """Search for similar chunks within a profile.
 
         Args:
             query_embedding: The query vector to search for
             limit: Maximum number of results
+            profile_id: Profile namespace to search (uses default if None)
             filter_book_ids: Optional filter to specific books
             filter_libraries: Optional filter to specific libraries
             min_score: Minimum similarity score threshold
@@ -693,19 +715,30 @@ class VectorStore(Protocol):
         """
         ...
 
-    def get_indexed_books(self) -> set[BookIdentifier]:
-        """Get set of all indexed book identifiers.
+    def get_indexed_books(
+        self,
+        profile_id: str | None = None,
+    ) -> set[BookIdentifier]:
+        """Get set of all indexed book identifiers in a profile.
+
+        Args:
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             Set of BookIdentifier for all indexed books
         """
         ...
 
-    def get_chunk_count(self, book_id: BookIdentifier | None = None) -> int:
-        """Get total chunk count.
+    def get_chunk_count(
+        self,
+        book_id: BookIdentifier | None = None,
+        profile_id: str | None = None,
+    ) -> int:
+        """Get total chunk count in a profile.
 
         Args:
             book_id: Optional filter to count chunks for specific book
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             Number of chunks in store
@@ -728,6 +761,19 @@ class VectorStore(Protocol):
         """
         ...
 
-    def clear(self) -> None:
-        """Remove all data from the store."""
+    def clear(self, profile_id: str | None = None) -> None:
+        """Remove all data from the store or a specific profile.
+
+        Args:
+            profile_id: If provided, only clear that profile.
+                       If None, clear entire store.
+        """
+        ...
+
+    def get_profiles(self) -> list[str]:
+        """Get list of all profiles with data in the store.
+
+        Returns:
+            List of profile IDs.
+        """
         ...
