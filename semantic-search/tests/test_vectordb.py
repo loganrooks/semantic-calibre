@@ -333,7 +333,8 @@ class TestVectorStoreSearch:
         for chunk, score in results:
             assert isinstance(chunk, TextChunk)
             assert isinstance(score, float)
-            assert 0.0 <= score <= 1.0
+            # Allow small floating point tolerance (cosine similarity can slightly exceed 1.0)
+            assert 0.0 <= score <= 1.0 + 1e-6
 
     def test_search_scores_descending(
         self,
@@ -571,3 +572,145 @@ class TestVectorStoreFactory:
 
         with pytest.raises(ValueError, match="Unknown vector store backend"):
             create_vector_store(config)
+
+
+# =============================================================================
+# Profile Support Tests
+# =============================================================================
+
+
+class TestVectorStoreProfileSupport:
+    """Tests for profile-based namespace isolation in vector stores."""
+
+    def test_add_to_different_profiles(
+        self,
+        memory_store,
+        sample_embedded_chunks: list[EmbeddedChunk],
+    ) -> None:
+        """Chunks added to different profiles should be isolated."""
+        # Split chunks between two profiles
+        profile_a_chunks = sample_embedded_chunks[:2]
+        profile_b_chunks = sample_embedded_chunks[2:]
+
+        memory_store.add(profile_a_chunks, profile_id="profile-a")
+        memory_store.add(profile_b_chunks, profile_id="profile-b")
+
+        # Each profile should only contain its own chunks
+        assert memory_store.get_chunk_count(profile_id="profile-a") == len(profile_a_chunks)
+        assert memory_store.get_chunk_count(profile_id="profile-b") == len(profile_b_chunks)
+
+    def test_search_isolated_by_profile(
+        self,
+        memory_store,
+        sample_embedded_chunks: list[EmbeddedChunk],
+    ) -> None:
+        """Search should only return results from the specified profile."""
+        # Add same chunks to different profiles
+        memory_store.add(sample_embedded_chunks[:2], profile_id="profile-a")
+        memory_store.add(sample_embedded_chunks[2:], profile_id="profile-b")
+
+        query = sample_embedded_chunks[0].embedding
+
+        # Search in profile-a should only find chunks from profile-a
+        results_a = memory_store.search(query, limit=10, profile_id="profile-a")
+        for chunk, _ in results_a:
+            assert chunk.id in [c.chunk.id for c in sample_embedded_chunks[:2]]
+
+    def test_remove_book_isolated_by_profile(
+        self,
+        memory_store,
+        sample_embedded_chunks: list[EmbeddedChunk],
+    ) -> None:
+        """Removing a book should only affect the specified profile."""
+        book_id = sample_embedded_chunks[0].chunk.book_id
+
+        # Add same chunk to both profiles
+        memory_store.add([sample_embedded_chunks[0]], profile_id="profile-a")
+        memory_store.add([sample_embedded_chunks[0]], profile_id="profile-b")
+
+        # Remove from profile-a only
+        memory_store.remove_book(book_id, profile_id="profile-a")
+
+        # Profile-a should be empty, profile-b should still have the chunk
+        assert memory_store.get_chunk_count(profile_id="profile-a") == 0
+        assert memory_store.get_chunk_count(profile_id="profile-b") == 1
+
+    def test_get_indexed_books_isolated_by_profile(
+        self,
+        memory_store,
+        sample_embedded_chunks: list[EmbeddedChunk],
+        sample_book_ids: list[BookIdentifier],
+    ) -> None:
+        """get_indexed_books should only return books from specified profile."""
+        # Add different books to different profiles
+        book_a_chunks = [c for c in sample_embedded_chunks if c.chunk.book_id == sample_book_ids[0]]
+        book_b_chunks = [c for c in sample_embedded_chunks if c.chunk.book_id == sample_book_ids[1]]
+
+        memory_store.add(book_a_chunks, profile_id="profile-a")
+        memory_store.add(book_b_chunks, profile_id="profile-b")
+
+        books_a = memory_store.get_indexed_books(profile_id="profile-a")
+        books_b = memory_store.get_indexed_books(profile_id="profile-b")
+
+        assert sample_book_ids[0] in books_a
+        assert sample_book_ids[1] not in books_a
+        assert sample_book_ids[0] not in books_b
+        assert sample_book_ids[1] in books_b
+
+    def test_clear_profile_only(
+        self,
+        memory_store,
+        sample_embedded_chunks: list[EmbeddedChunk],
+    ) -> None:
+        """Clearing a profile should not affect other profiles."""
+        memory_store.add(sample_embedded_chunks[:2], profile_id="profile-a")
+        memory_store.add(sample_embedded_chunks[2:], profile_id="profile-b")
+
+        # Clear only profile-a
+        memory_store.clear(profile_id="profile-a")
+
+        assert memory_store.get_chunk_count(profile_id="profile-a") == 0
+        assert memory_store.get_chunk_count(profile_id="profile-b") == len(sample_embedded_chunks) - 2
+
+    def test_clear_all_profiles(
+        self,
+        memory_store,
+        sample_embedded_chunks: list[EmbeddedChunk],
+    ) -> None:
+        """Clearing without profile_id should clear all profiles."""
+        memory_store.add(sample_embedded_chunks[:2], profile_id="profile-a")
+        memory_store.add(sample_embedded_chunks[2:], profile_id="profile-b")
+
+        memory_store.clear()
+
+        assert memory_store.get_chunk_count(profile_id="profile-a") == 0
+        assert memory_store.get_chunk_count(profile_id="profile-b") == 0
+
+    def test_get_profiles(
+        self,
+        memory_store,
+        sample_embedded_chunks: list[EmbeddedChunk],
+    ) -> None:
+        """get_profiles should return list of profiles with data."""
+        memory_store.add(sample_embedded_chunks[:1], profile_id="profile-a")
+        memory_store.add(sample_embedded_chunks[1:2], profile_id="profile-b")
+
+        profiles = memory_store.get_profiles()
+
+        assert "profile-a" in profiles
+        assert "profile-b" in profiles
+
+    def test_default_profile(
+        self,
+        memory_store,
+        sample_embedded_chunks: list[EmbeddedChunk],
+    ) -> None:
+        """Adding without profile_id should use default profile."""
+        memory_store.add(sample_embedded_chunks)
+
+        # Should be able to retrieve with profile_id=None
+        assert memory_store.get_chunk_count() == len(sample_embedded_chunks)
+
+        # Default profile should be in the profiles list
+        profiles = memory_store.get_profiles()
+        assert len(profiles) == 1  # Only default profile

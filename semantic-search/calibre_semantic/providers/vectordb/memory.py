@@ -1,4 +1,4 @@
-"""In-memory vector store implementation.
+"""In-memory vector store implementation with profile support.
 
 This store keeps all vectors in memory using NumPy arrays.
 It's useful for:
@@ -13,8 +13,8 @@ Usage:
     >>> from calibre_semantic.core.types import VectorStoreConfig
     >>> config = VectorStoreConfig(backend="memory")
     >>> store = InMemoryVectorStore(config)
-    >>> store.add(embedded_chunks)
-    >>> results = store.search(query_vector, limit=10)
+    >>> store.add(embedded_chunks, profile_id="my-profile")
+    >>> results = store.search(query_vector, profile_id="my-profile", limit=10)
 """
 
 from __future__ import annotations
@@ -35,6 +35,9 @@ from calibre_semantic.core.vectordb import BaseVectorStore
 
 logger = logging.getLogger(__name__)
 
+# Default profile for backwards compatibility
+DEFAULT_PROFILE_ID = "_default"
+
 
 class InMemoryVectorStore(BaseVectorStore):
     """In-memory vector store using NumPy for similarity search.
@@ -46,10 +49,14 @@ class InMemoryVectorStore(BaseVectorStore):
     datasets (up to ~100k vectors). For larger datasets, consider
     using FAISS or another optimized backend.
 
+    Profile Support:
+        All operations accept an optional profile_id parameter.
+        Data is stored in separate namespaces per profile.
+
     Attributes:
         config: The vector store configuration
-        _chunks: Dict mapping chunk ID to TextChunk
-        _vectors: Dict mapping chunk ID to embedding vector
+        _profile_chunks: Dict mapping profile_id to {chunk_id: TextChunk}
+        _profile_vectors: Dict mapping profile_id to {chunk_id: Vector}
         _model_id: The embedding model ID for cache invalidation
     """
 
@@ -60,56 +67,109 @@ class InMemoryVectorStore(BaseVectorStore):
             config: Vector store configuration (path is ignored)
         """
         super().__init__(config)
-        self._chunks: dict[str, TextChunk] = {}
-        self._vectors: dict[str, Vector] = {}
+        # Store data per profile
+        self._profile_chunks: dict[str, dict[str, TextChunk]] = {}
+        self._profile_vectors: dict[str, dict[str, Vector]] = {}
         logger.info("Initialized in-memory vector store")
 
-    def add(self, chunks: Sequence[EmbeddedChunk]) -> None:
+    def _get_profile_data(
+        self, profile_id: str | None, create: bool = False
+    ) -> tuple[dict[str, TextChunk], dict[str, Vector]] | tuple[None, None]:
+        """Get chunks and vectors dicts for a profile.
+
+        Args:
+            profile_id: Profile ID (uses default if None)
+            create: If True, create profile data structures if missing
+
+        Returns:
+            Tuple of (chunks_dict, vectors_dict) or (None, None) if not found
+        """
+        profile_id = profile_id or DEFAULT_PROFILE_ID
+
+        if profile_id not in self._profile_chunks:
+            if create:
+                self._profile_chunks[profile_id] = {}
+                self._profile_vectors[profile_id] = {}
+            else:
+                return None, None
+
+        return self._profile_chunks[profile_id], self._profile_vectors[profile_id]
+
+    def add(
+        self,
+        chunks: Sequence[EmbeddedChunk],
+        profile_id: str | None = None,
+    ) -> None:
         """Add embedded chunks to the store.
 
         Args:
             chunks: Sequence of embedded chunks to store
+            profile_id: Profile namespace (uses default if None)
         """
         if not chunks:
             return
 
+        chunks_dict, vectors_dict = self._get_profile_data(profile_id, create=True)
+
         for embedded_chunk in chunks:
             chunk_id = embedded_chunk.chunk.id
-            self._chunks[chunk_id] = embedded_chunk.chunk
-            self._vectors[chunk_id] = embedded_chunk.embedding
+            chunks_dict[chunk_id] = embedded_chunk.chunk
+            vectors_dict[chunk_id] = embedded_chunk.embedding
 
-        logger.debug(f"Added {len(chunks)} chunks to store (total: {len(self._chunks)})")
+        profile_id = profile_id or DEFAULT_PROFILE_ID
+        logger.debug(
+            f"Added {len(chunks)} chunks to profile '{profile_id}' "
+            f"(total: {len(chunks_dict)})"
+        )
 
-    def remove(self, chunk_ids: Sequence[str]) -> None:
+    def remove(
+        self,
+        chunk_ids: Sequence[str],
+        profile_id: str | None = None,
+    ) -> None:
         """Remove chunks by ID.
 
         Args:
             chunk_ids: Sequence of chunk IDs to remove
+            profile_id: Profile namespace (uses default if None)
         """
+        chunks_dict, vectors_dict = self._get_profile_data(profile_id)
+        if chunks_dict is None:
+            return
+
         for chunk_id in chunk_ids:
-            self._chunks.pop(chunk_id, None)
-            self._vectors.pop(chunk_id, None)
+            chunks_dict.pop(chunk_id, None)
+            vectors_dict.pop(chunk_id, None)
 
         logger.debug(f"Removed {len(chunk_ids)} chunks")
 
-    def remove_book(self, book_id: BookIdentifier) -> int:
-        """Remove all chunks for a book.
+    def remove_book(
+        self,
+        book_id: BookIdentifier,
+        profile_id: str | None = None,
+    ) -> int:
+        """Remove all chunks for a book from a profile.
 
         Args:
             book_id: The book whose chunks should be removed
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             Number of chunks removed
         """
+        chunks_dict, vectors_dict = self._get_profile_data(profile_id)
+        if chunks_dict is None:
+            return 0
+
         ids_to_remove = [
             chunk_id
-            for chunk_id, chunk in self._chunks.items()
+            for chunk_id, chunk in chunks_dict.items()
             if chunk.book_id == book_id
         ]
 
         for chunk_id in ids_to_remove:
-            del self._chunks[chunk_id]
-            del self._vectors[chunk_id]
+            del chunks_dict[chunk_id]
+            del vectors_dict[chunk_id]
 
         logger.debug(f"Removed {len(ids_to_remove)} chunks for book {book_id}")
         return len(ids_to_remove)
@@ -118,6 +178,7 @@ class InMemoryVectorStore(BaseVectorStore):
         self,
         query_embedding: Vector,
         limit: int = 10,
+        profile_id: str | None = None,
         filter_book_ids: Sequence[BookIdentifier] | None = None,
         filter_libraries: Sequence[str] | None = None,
         min_score: float = 0.0,
@@ -129,6 +190,7 @@ class InMemoryVectorStore(BaseVectorStore):
         Args:
             query_embedding: The query vector to search for
             limit: Maximum number of results
+            profile_id: Profile namespace to search (uses default if None)
             filter_book_ids: Optional filter to specific books
             filter_libraries: Optional filter to specific libraries
             min_score: Minimum similarity score threshold
@@ -136,18 +198,21 @@ class InMemoryVectorStore(BaseVectorStore):
         Returns:
             List of (chunk, score) tuples, ordered by descending score
         """
-        if not self._chunks:
+        chunks_dict, vectors_dict = self._get_profile_data(profile_id)
+        if chunks_dict is None or not chunks_dict:
             return []
 
         # Apply filters to get candidate chunks
-        candidates = self._get_filtered_candidates(filter_book_ids, filter_libraries)
+        candidates = self._get_filtered_candidates(
+            chunks_dict, filter_book_ids, filter_libraries
+        )
 
         if not candidates:
             return []
 
         # Build matrix of candidate vectors
         chunk_ids = list(candidates.keys())
-        vectors = np.array([self._vectors[cid] for cid in chunk_ids])
+        vectors = np.array([vectors_dict[cid] for cid in chunk_ids])
 
         # Compute cosine similarities (dot product since normalized)
         # query_embedding shape: (dim,)
@@ -178,19 +243,21 @@ class InMemoryVectorStore(BaseVectorStore):
 
     def _get_filtered_candidates(
         self,
+        chunks_dict: dict[str, TextChunk],
         filter_book_ids: Sequence[BookIdentifier] | None,
         filter_libraries: Sequence[str] | None,
     ) -> dict[str, TextChunk]:
         """Get chunks that match the filters.
 
         Args:
+            chunks_dict: The chunks dictionary to filter
             filter_book_ids: Optional filter to specific books
             filter_libraries: Optional filter to specific libraries
 
         Returns:
             Dict mapping chunk ID to TextChunk for matching chunks
         """
-        candidates = self._chunks
+        candidates = chunks_dict
 
         if filter_book_ids is not None:
             filter_set = set(filter_book_ids)
@@ -210,31 +277,69 @@ class InMemoryVectorStore(BaseVectorStore):
 
         return candidates
 
-    def get_indexed_books(self) -> set[BookIdentifier]:
-        """Get set of all indexed book identifiers.
+    def get_indexed_books(
+        self,
+        profile_id: str | None = None,
+    ) -> set[BookIdentifier]:
+        """Get set of all indexed book identifiers in a profile.
+
+        Args:
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             Set of BookIdentifier for all indexed books
         """
-        return {chunk.book_id for chunk in self._chunks.values()}
+        chunks_dict, _ = self._get_profile_data(profile_id)
+        if chunks_dict is None:
+            return set()
+        return {chunk.book_id for chunk in chunks_dict.values()}
 
-    def get_chunk_count(self, book_id: BookIdentifier | None = None) -> int:
-        """Get total chunk count.
+    def get_chunk_count(
+        self,
+        book_id: BookIdentifier | None = None,
+        profile_id: str | None = None,
+    ) -> int:
+        """Get total chunk count in a profile.
 
         Args:
             book_id: Optional filter to count chunks for specific book
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             Number of chunks in store
         """
+        chunks_dict, _ = self._get_profile_data(profile_id)
+        if chunks_dict is None:
+            return 0
+
         if book_id is None:
-            return len(self._chunks)
+            return len(chunks_dict)
 
-        return sum(1 for chunk in self._chunks.values() if chunk.book_id == book_id)
+        return sum(1 for chunk in chunks_dict.values() if chunk.book_id == book_id)
 
-    def clear(self) -> None:
-        """Remove all data from the store."""
-        self._chunks.clear()
-        self._vectors.clear()
-        self._model_id = None
-        logger.info("Cleared in-memory vector store")
+    def get_profiles(self) -> list[str]:
+        """Get list of all profiles with data in the store.
+
+        Returns:
+            List of profile IDs
+        """
+        return list(self._profile_chunks.keys())
+
+    def clear(self, profile_id: str | None = None) -> None:
+        """Remove all data from the store or a specific profile.
+
+        Args:
+            profile_id: If provided, only clear that profile.
+                       If None, clear entire store.
+        """
+        if profile_id is not None:
+            # Clear specific profile
+            self._profile_chunks.pop(profile_id, None)
+            self._profile_vectors.pop(profile_id, None)
+            logger.info(f"Cleared profile '{profile_id}' from in-memory store")
+        else:
+            # Clear entire store
+            self._profile_chunks.clear()
+            self._profile_vectors.clear()
+            self._model_id = None
+            logger.info("Cleared entire in-memory vector store")

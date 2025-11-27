@@ -33,6 +33,7 @@ class BaseVectorStore(ABC):
 
     Provides common functionality for all vector stores:
     - Model ID tracking for cache invalidation
+    - Profile-based namespace isolation
     - Logging
 
     Subclasses must implement all abstract methods for:
@@ -40,13 +41,18 @@ class BaseVectorStore(ABC):
     - Searching by vector similarity
     - Index management
 
+    Profile Support:
+        All operations accept an optional profile_id parameter for namespace
+        isolation. This allows storing embeddings from different models or
+        configurations in the same database without conflicts.
+
     Example usage:
         class MyStore(BaseVectorStore):
-            def add(self, chunks: Sequence[EmbeddedChunk]) -> None:
+            def add(self, chunks: Sequence[EmbeddedChunk], profile_id: str | None = None) -> None:
                 # Store chunks in your backend
                 pass
 
-            def search(self, query: Vector, ...) -> list[tuple[TextChunk, float]]:
+            def search(self, query: Vector, ..., profile_id: str | None = None) -> list[tuple[TextChunk, float]]:
                 # Search your backend
                 pass
     """
@@ -61,29 +67,44 @@ class BaseVectorStore(ABC):
         self._model_id: str | None = None
 
     @abstractmethod
-    def add(self, chunks: Sequence[EmbeddedChunk]) -> None:
+    def add(
+        self,
+        chunks: Sequence[EmbeddedChunk],
+        profile_id: str | None = None,
+    ) -> None:
         """Add embedded chunks to the store.
 
         Args:
             chunks: Sequence of embedded chunks to store
+            profile_id: Profile namespace (uses default if None)
         """
         pass
 
     @abstractmethod
-    def remove(self, chunk_ids: Sequence[str]) -> None:
+    def remove(
+        self,
+        chunk_ids: Sequence[str],
+        profile_id: str | None = None,
+    ) -> None:
         """Remove chunks by ID.
 
         Args:
             chunk_ids: Sequence of chunk IDs to remove
+            profile_id: Profile namespace (uses default if None)
         """
         pass
 
     @abstractmethod
-    def remove_book(self, book_id: BookIdentifier) -> int:
-        """Remove all chunks for a book.
+    def remove_book(
+        self,
+        book_id: BookIdentifier,
+        profile_id: str | None = None,
+    ) -> int:
+        """Remove all chunks for a book from a profile.
 
         Args:
             book_id: The book whose chunks should be removed
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             Number of chunks removed
@@ -95,15 +116,17 @@ class BaseVectorStore(ABC):
         self,
         query_embedding: Vector,
         limit: int = 10,
+        profile_id: str | None = None,
         filter_book_ids: Sequence[BookIdentifier] | None = None,
         filter_libraries: Sequence[str] | None = None,
         min_score: float = 0.0,
     ) -> list[tuple[TextChunk, float]]:
-        """Search for similar chunks.
+        """Search for similar chunks within a profile.
 
         Args:
             query_embedding: The query vector to search for
             limit: Maximum number of results
+            profile_id: Profile namespace to search (uses default if None)
             filter_book_ids: Optional filter to specific books
             filter_libraries: Optional filter to specific libraries
             min_score: Minimum similarity score threshold
@@ -114,8 +137,14 @@ class BaseVectorStore(ABC):
         pass
 
     @abstractmethod
-    def get_indexed_books(self) -> set[BookIdentifier]:
-        """Get set of all indexed book identifiers.
+    def get_indexed_books(
+        self,
+        profile_id: str | None = None,
+    ) -> set[BookIdentifier]:
+        """Get set of all indexed book identifiers in a profile.
+
+        Args:
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             Set of BookIdentifier for all indexed books
@@ -123,11 +152,16 @@ class BaseVectorStore(ABC):
         pass
 
     @abstractmethod
-    def get_chunk_count(self, book_id: BookIdentifier | None = None) -> int:
-        """Get total chunk count.
+    def get_chunk_count(
+        self,
+        book_id: BookIdentifier | None = None,
+        profile_id: str | None = None,
+    ) -> int:
+        """Get total chunk count in a profile.
 
         Args:
             book_id: Optional filter to count chunks for specific book
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             Number of chunks in store
@@ -151,9 +185,22 @@ class BaseVectorStore(ABC):
         self._model_id = model_id
 
     @abstractmethod
-    def clear(self) -> None:
-        """Remove all data from the store."""
+    def clear(self, profile_id: str | None = None) -> None:
+        """Remove all data from the store or a specific profile.
+
+        Args:
+            profile_id: If provided, only clear that profile.
+                       If None, clear entire store.
+        """
         pass
+
+    def get_profiles(self) -> list[str]:
+        """Get list of all profiles with data in the store.
+
+        Returns:
+            List of profile IDs. Default implementation returns empty list.
+        """
+        return []
 
     def needs_reindex(self, model_id: str) -> bool:
         """Check if store needs reindexing due to model change.

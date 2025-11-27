@@ -1,9 +1,10 @@
-"""SQLite-vec vector store implementation.
+"""SQLite-vec vector store implementation with profile support.
 
 This store uses SQLite with the sqlite-vec extension for persistent
 vector storage and similarity search. It provides:
 - ACID-compliant persistence
 - Efficient vector similarity search
+- Profile-based namespace isolation
 - Integration with Calibre's existing SQLite infrastructure
 
 Installation:
@@ -18,8 +19,8 @@ Usage:
     ...     path=Path("/path/to/store.db")
     ... )
     >>> store = SQLiteVecStore(config)
-    >>> store.add(embedded_chunks)
-    >>> results = store.search(query_vector, limit=10)
+    >>> store.add(embedded_chunks, profile_id="my-profile")
+    >>> results = store.search(query_vector, profile_id="my-profile", limit=10)
 """
 
 from __future__ import annotations
@@ -45,17 +46,21 @@ from calibre_semantic.core.vectordb import BaseVectorStore
 
 logger = logging.getLogger(__name__)
 
-# SQL for creating the schema
-_CREATE_SCHEMA = """
+# Default profile for backwards compatibility
+DEFAULT_PROFILE_ID = "_default"
+
+# SQL for creating the schema (v2 with profile support)
+_CREATE_SCHEMA_V2 = """
 -- Metadata table for store configuration
 CREATE TABLE IF NOT EXISTS store_metadata (
     key TEXT PRIMARY KEY,
     value TEXT
 );
 
--- Chunks table for storing text chunk data
+-- Chunks table for storing text chunk data (v2 with profile_id)
 CREATE TABLE IF NOT EXISTS chunks (
-    id TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
     book_library_id TEXT NOT NULL,
     book_id INTEGER NOT NULL,
     book_format TEXT NOT NULL,
@@ -68,16 +73,21 @@ CREATE TABLE IF NOT EXISTS chunks (
     chunk_type TEXT NOT NULL,
     chapter_title TEXT,
     section_title TEXT,
-    metadata TEXT
+    metadata TEXT,
+    PRIMARY KEY (id, profile_id)
 );
 
--- Index for efficient book lookups
-CREATE INDEX IF NOT EXISTS idx_chunks_book
-ON chunks(book_library_id, book_id, book_format);
+-- Index for efficient book lookups within profile
+CREATE INDEX IF NOT EXISTS idx_chunks_profile_book
+ON chunks(profile_id, book_library_id, book_id, book_format);
 
--- Index for library filtering
-CREATE INDEX IF NOT EXISTS idx_chunks_library
-ON chunks(book_library_id);
+-- Index for profile filtering
+CREATE INDEX IF NOT EXISTS idx_chunks_profile
+ON chunks(profile_id);
+
+-- Index for library filtering within profile
+CREATE INDEX IF NOT EXISTS idx_chunks_profile_library
+ON chunks(profile_id, book_library_id);
 """
 
 # SQL for creating the vector table (done after loading sqlite-vec)
@@ -89,11 +99,79 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vectors USING vec0(
 """
 
 
+def _migrate_to_v2(conn: sqlite3.Connection) -> None:
+    """Migrate database from v1 (no profile) to v2 (with profile).
+
+    Adds profile_id column to existing chunks table and assigns
+    all existing data to the default profile.
+    """
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='chunks'"
+    )
+    if cursor.fetchone() is None:
+        return  # No chunks table, nothing to migrate
+
+    # Check if profile_id column exists
+    cursor = conn.execute("PRAGMA table_info(chunks)")
+    columns = [row[1] for row in cursor.fetchall()]
+
+    if "profile_id" in columns:
+        return  # Already migrated
+
+    logger.info("Migrating SQLite-vec store to v2 (adding profile support)")
+
+    # Create new table with profile_id
+    conn.executescript("""
+        -- Create new table with profile_id
+        CREATE TABLE chunks_v2 (
+            id TEXT NOT NULL,
+            profile_id TEXT NOT NULL,
+            book_library_id TEXT NOT NULL,
+            book_id INTEGER NOT NULL,
+            book_format TEXT NOT NULL,
+            text TEXT NOT NULL,
+            spine_index INTEGER NOT NULL,
+            spine_name TEXT NOT NULL,
+            start_offset INTEGER NOT NULL,
+            end_offset INTEGER NOT NULL,
+            cfi TEXT,
+            chunk_type TEXT NOT NULL,
+            chapter_title TEXT,
+            section_title TEXT,
+            metadata TEXT,
+            PRIMARY KEY (id, profile_id)
+        );
+
+        -- Copy data with default profile
+        INSERT INTO chunks_v2
+        SELECT id, '_default', book_library_id, book_id, book_format,
+               text, spine_index, spine_name, start_offset, end_offset,
+               cfi, chunk_type, chapter_title, section_title, metadata
+        FROM chunks;
+
+        -- Drop old table and rename
+        DROP TABLE chunks;
+        ALTER TABLE chunks_v2 RENAME TO chunks;
+
+        -- Recreate indexes
+        CREATE INDEX IF NOT EXISTS idx_chunks_profile_book
+        ON chunks(profile_id, book_library_id, book_id, book_format);
+
+        CREATE INDEX IF NOT EXISTS idx_chunks_profile
+        ON chunks(profile_id);
+
+        CREATE INDEX IF NOT EXISTS idx_chunks_profile_library
+        ON chunks(profile_id, book_library_id);
+    """)
+    conn.commit()
+    logger.info("Migration to v2 complete")
+
+
 class SQLiteVecStore(BaseVectorStore):
-    """SQLite-vec based vector store for persistent storage.
+    """SQLite-vec based vector store with profile support.
 
     Uses sqlite-vec extension for efficient vector similarity search.
-    Data is stored in a SQLite database file.
+    Data is stored in a SQLite database file with profile-based isolation.
 
     Attributes:
         config: The vector store configuration
@@ -140,8 +218,11 @@ class SQLiteVecStore(BaseVectorStore):
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
 
-        # Create base schema
-        self._conn.executescript(_CREATE_SCHEMA)
+        # Migrate if needed (before creating new schema)
+        _migrate_to_v2(self._conn)
+
+        # Create base schema (v2)
+        self._conn.executescript(_CREATE_SCHEMA_V2)
 
         # Load stored dimension and model ID
         self._dimension: int | None = self._get_metadata("dimension")
@@ -188,14 +269,21 @@ class SQLiteVecStore(BaseVectorStore):
             )
             self._conn.commit()
 
-    def add(self, chunks: Sequence[EmbeddedChunk]) -> None:
+    def add(
+        self,
+        chunks: Sequence[EmbeddedChunk],
+        profile_id: str | None = None,
+    ) -> None:
         """Add embedded chunks to the store.
 
         Args:
             chunks: Sequence of embedded chunks to store
+            profile_id: Profile to add chunks to (uses default if None)
         """
         if not chunks:
             return
+
+        profile_id = profile_id or DEFAULT_PROFILE_ID
 
         # Initialize dimension from first chunk if needed
         if self._dimension is None:
@@ -211,8 +299,13 @@ class SQLiteVecStore(BaseVectorStore):
             chunk = embedded_chunk.chunk
             book_id = chunk.book_id
 
+            # Create a unique vector ID that includes profile
+            # This allows same chunk to exist in multiple profiles
+            vector_id = f"{profile_id}:{chunk.id}"
+
             chunk_rows.append((
                 chunk.id,
+                profile_id,
                 book_id.library_id,
                 book_id.book_id,
                 book_id.format,
@@ -230,16 +323,16 @@ class SQLiteVecStore(BaseVectorStore):
 
             # Convert embedding to bytes for sqlite-vec
             embedding_bytes = embedded_chunk.embedding.astype(np.float32).tobytes()
-            vector_rows.append((chunk.id, embedding_bytes))
+            vector_rows.append((vector_id, embedding_bytes))
 
         # Insert chunks
         self._conn.executemany(
             """
             INSERT OR REPLACE INTO chunks (
-                id, book_library_id, book_id, book_format, text,
+                id, profile_id, book_library_id, book_id, book_format, text,
                 spine_index, spine_name, start_offset, end_offset, cfi,
                 chunk_type, chapter_title, section_title, metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             chunk_rows,
         )
@@ -251,55 +344,80 @@ class SQLiteVecStore(BaseVectorStore):
         )
 
         self._conn.commit()
-        logger.debug(f"Added {len(chunks)} chunks to SQLite-vec store")
+        logger.debug(f"Added {len(chunks)} chunks to profile '{profile_id}'")
 
-    def remove(self, chunk_ids: Sequence[str]) -> None:
+    def remove(
+        self,
+        chunk_ids: Sequence[str],
+        profile_id: str | None = None,
+    ) -> None:
         """Remove chunks by ID.
 
         Args:
             chunk_ids: Sequence of chunk IDs to remove
+            profile_id: Profile to remove from (uses default if None)
         """
         if not chunk_ids:
             return
 
+        profile_id = profile_id or DEFAULT_PROFILE_ID
+
         placeholders = ",".join("?" * len(chunk_ids))
+
+        # Remove from chunks table (profile-specific)
         self._conn.execute(
-            f"DELETE FROM chunks WHERE id IN ({placeholders})", list(chunk_ids)
+            f"DELETE FROM chunks WHERE profile_id = ? AND id IN ({placeholders})",
+            [profile_id] + list(chunk_ids),
         )
+
+        # Remove from vectors (using profile-prefixed IDs)
+        vector_ids = [f"{profile_id}:{cid}" for cid in chunk_ids]
+        vector_placeholders = ",".join("?" * len(vector_ids))
         self._conn.execute(
-            f"DELETE FROM chunk_vectors WHERE id IN ({placeholders})", list(chunk_ids)
+            f"DELETE FROM chunk_vectors WHERE id IN ({vector_placeholders})",
+            vector_ids,
         )
+
         self._conn.commit()
 
-    def remove_book(self, book_id: BookIdentifier) -> int:
-        """Remove all chunks for a book.
+    def remove_book(
+        self,
+        book_id: BookIdentifier,
+        profile_id: str | None = None,
+    ) -> int:
+        """Remove all chunks for a book from a profile.
 
         Args:
             book_id: The book whose chunks should be removed
+            profile_id: Profile to remove from (uses default if None)
 
         Returns:
             Number of chunks removed
         """
-        # Get chunk IDs for this book
+        profile_id = profile_id or DEFAULT_PROFILE_ID
+
+        # Get chunk IDs for this book in this profile
         cursor = self._conn.execute(
             """
             SELECT id FROM chunks
-            WHERE book_library_id = ? AND book_id = ? AND book_format = ?
+            WHERE profile_id = ?
+              AND book_library_id = ? AND book_id = ? AND book_format = ?
             """,
-            (book_id.library_id, book_id.book_id, book_id.format),
+            (profile_id, book_id.library_id, book_id.book_id, book_id.format),
         )
         chunk_ids = [row["id"] for row in cursor.fetchall()]
 
         if not chunk_ids:
             return 0
 
-        self.remove(chunk_ids)
+        self.remove(chunk_ids, profile_id)
         return len(chunk_ids)
 
     def search(
         self,
         query_embedding: Vector,
         limit: int = 10,
+        profile_id: str | None = None,
         filter_book_ids: Sequence[BookIdentifier] | None = None,
         filter_libraries: Sequence[str] | None = None,
         min_score: float = 0.0,
@@ -311,6 +429,7 @@ class SQLiteVecStore(BaseVectorStore):
         Args:
             query_embedding: The query vector to search for
             limit: Maximum number of results
+            profile_id: Profile to search in (uses default if None)
             filter_book_ids: Optional filter to specific books
             filter_libraries: Optional filter to specific libraries
             min_score: Minimum similarity score threshold
@@ -321,28 +440,32 @@ class SQLiteVecStore(BaseVectorStore):
         if self._dimension is None:
             return []
 
+        profile_id = profile_id or DEFAULT_PROFILE_ID
+
         # Convert query to bytes
         query_bytes = query_embedding.astype(np.float32).tobytes()
 
         # Build query with filters
         # sqlite-vec returns distance, we convert to similarity (1 - distance/2 for cosine)
+        # Vector IDs are prefixed with profile_id
         sql = """
             SELECT
                 c.*,
                 1.0 - (vec_distance_cosine(v.embedding, ?) / 2.0) as similarity
             FROM chunk_vectors v
-            JOIN chunks c ON c.id = v.id
-            WHERE 1=1
+            JOIN chunks c ON c.id = substr(v.id, length(c.profile_id) + 2)
+                         AND c.profile_id = ?
+            WHERE c.profile_id = ?
         """
-        params: list[Any] = [query_bytes]
+        params: list[Any] = [query_bytes, profile_id, profile_id]
 
         if filter_book_ids:
             book_conditions = []
-            for book_id in filter_book_ids:
+            for bid in filter_book_ids:
                 book_conditions.append(
                     "(c.book_library_id = ? AND c.book_id = ? AND c.book_format = ?)"
                 )
-                params.extend([book_id.library_id, book_id.book_id, book_id.format])
+                params.extend([bid.library_id, bid.book_id, bid.format])
             sql += f" AND ({' OR '.join(book_conditions)})"
 
         if filter_libraries:
@@ -393,14 +516,27 @@ class SQLiteVecStore(BaseVectorStore):
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
         )
 
-    def get_indexed_books(self) -> set[BookIdentifier]:
-        """Get set of all indexed book identifiers.
+    def get_indexed_books(
+        self,
+        profile_id: str | None = None,
+    ) -> set[BookIdentifier]:
+        """Get set of all indexed book identifiers in a profile.
+
+        Args:
+            profile_id: Profile to query (uses default if None)
 
         Returns:
             Set of BookIdentifier for all indexed books
         """
+        profile_id = profile_id or DEFAULT_PROFILE_ID
+
         cursor = self._conn.execute(
-            "SELECT DISTINCT book_library_id, book_id, book_format FROM chunks"
+            """
+            SELECT DISTINCT book_library_id, book_id, book_format
+            FROM chunks
+            WHERE profile_id = ?
+            """,
+            (profile_id,),
         )
         return {
             BookIdentifier(
@@ -411,26 +547,48 @@ class SQLiteVecStore(BaseVectorStore):
             for row in cursor.fetchall()
         }
 
-    def get_chunk_count(self, book_id: BookIdentifier | None = None) -> int:
+    def get_chunk_count(
+        self,
+        book_id: BookIdentifier | None = None,
+        profile_id: str | None = None,
+    ) -> int:
         """Get total chunk count.
 
         Args:
             book_id: Optional filter to count chunks for specific book
+            profile_id: Profile to query (uses default if None)
 
         Returns:
             Number of chunks in store
         """
+        profile_id = profile_id or DEFAULT_PROFILE_ID
+
         if book_id is None:
-            cursor = self._conn.execute("SELECT COUNT(*) as count FROM chunks")
+            cursor = self._conn.execute(
+                "SELECT COUNT(*) as count FROM chunks WHERE profile_id = ?",
+                (profile_id,),
+            )
         else:
             cursor = self._conn.execute(
                 """
                 SELECT COUNT(*) as count FROM chunks
-                WHERE book_library_id = ? AND book_id = ? AND book_format = ?
+                WHERE profile_id = ?
+                  AND book_library_id = ? AND book_id = ? AND book_format = ?
                 """,
-                (book_id.library_id, book_id.book_id, book_id.format),
+                (profile_id, book_id.library_id, book_id.book_id, book_id.format),
             )
         return cursor.fetchone()["count"]
+
+    def get_profiles(self) -> list[str]:
+        """Get list of all profiles with data in the store.
+
+        Returns:
+            List of profile IDs
+        """
+        cursor = self._conn.execute(
+            "SELECT DISTINCT profile_id FROM chunks ORDER BY profile_id"
+        )
+        return [row["profile_id"] for row in cursor.fetchall()]
 
     def get_model_id(self) -> str | None:
         """Get the model ID from store metadata."""
@@ -441,15 +599,42 @@ class SQLiteVecStore(BaseVectorStore):
         self._model_id = model_id
         self._set_metadata("model_id", model_id)
 
-    def clear(self) -> None:
-        """Remove all data from the store."""
-        self._conn.execute("DELETE FROM chunks")
-        self._conn.execute("DELETE FROM chunk_vectors")
-        self._conn.execute("DELETE FROM store_metadata")
-        self._conn.commit()
-        self._dimension = None
-        self._model_id = None
-        logger.info("Cleared SQLite-vec store")
+    def clear(self, profile_id: str | None = None) -> None:
+        """Remove all data from the store or a specific profile.
+
+        Args:
+            profile_id: If provided, only clear that profile.
+                       If None, clear entire store.
+        """
+        if profile_id is not None:
+            # Clear specific profile
+            cursor = self._conn.execute(
+                "SELECT id FROM chunks WHERE profile_id = ?", (profile_id,)
+            )
+            chunk_ids = [row["id"] for row in cursor.fetchall()]
+            vector_ids = [f"{profile_id}:{cid}" for cid in chunk_ids]
+
+            if vector_ids:
+                placeholders = ",".join("?" * len(vector_ids))
+                self._conn.execute(
+                    f"DELETE FROM chunk_vectors WHERE id IN ({placeholders})",
+                    vector_ids,
+                )
+
+            self._conn.execute(
+                "DELETE FROM chunks WHERE profile_id = ?", (profile_id,)
+            )
+            self._conn.commit()
+            logger.info(f"Cleared profile '{profile_id}' from SQLite-vec store")
+        else:
+            # Clear entire store
+            self._conn.execute("DELETE FROM chunks")
+            self._conn.execute("DELETE FROM chunk_vectors")
+            self._conn.execute("DELETE FROM store_metadata")
+            self._conn.commit()
+            self._dimension = None
+            self._model_id = None
+            logger.info("Cleared entire SQLite-vec store")
 
     def close(self) -> None:
         """Close the database connection."""

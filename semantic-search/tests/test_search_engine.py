@@ -90,16 +90,16 @@ def mock_embedding_provider():
 
 @pytest.fixture
 def mock_vector_store():
-    """Create a mock vector store."""
+    """Create a mock vector store with profile support."""
     store = MagicMock()
     store._chunks: dict[str, EmbeddedChunk] = {}
     store._model_id = None
 
-    def add_chunks(chunks):
+    def add_chunks(chunks, profile_id=None):
         for chunk in chunks:
             store._chunks[chunk.chunk.id] = chunk
 
-    def remove_book(book_id):
+    def remove_book(book_id, profile_id=None):
         to_remove = [
             cid for cid, c in store._chunks.items()
             if c.chunk.book_id == book_id
@@ -108,13 +108,17 @@ def mock_vector_store():
             del store._chunks[cid]
         return len(to_remove)
 
-    def get_indexed_books():
+    def get_indexed_books(profile_id=None):
         return {c.chunk.book_id for c in store._chunks.values()}
 
-    def get_chunk_count(book_id=None):
+    def get_chunk_count(book_id=None, profile_id=None):
         if book_id is None:
             return len(store._chunks)
         return sum(1 for c in store._chunks.values() if c.chunk.book_id == book_id)
+
+    def clear(profile_id=None):
+        if profile_id is None:
+            store._chunks.clear()
 
     store.add.side_effect = add_chunks
     store.remove_book.side_effect = remove_book
@@ -122,8 +126,10 @@ def mock_vector_store():
     store.get_chunk_count.side_effect = get_chunk_count
     store.get_model_id.return_value = None
     store.set_model_id.side_effect = lambda m: setattr(store, '_model_id', m)
-    store.search.return_value = []  # Will be customized per test
-    store.clear.return_value = None
+    # Use return_value for search so tests can override it
+    store.search.return_value = []
+    store.clear.side_effect = clear
+    store.get_profiles.return_value = []
 
     return store
 
