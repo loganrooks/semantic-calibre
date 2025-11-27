@@ -87,24 +87,55 @@ Use Python Protocols for abstractions. See `core/types.py` for examples.
 
 ## Maintenance Protocol
 
+### Automated Compliance Checks
+
+Run these before major commits:
+
+```bash
+# Protocol/Implementation sync + ADR compliance
+cd semantic-search && python -m pytest tests/test_protocol_compliance.py -v
+
+# Full test suite
+python -m pytest tests/ -v
+```
+
+The compliance tests verify:
+- Protocol signatures match implementation signatures
+- ADR-002: `index_on_add` defaults to `False`
+- All BaseVectorStore methods exist in VectorStore Protocol
+
+### Documentation Sync Points
+
+These files must stay synchronized:
+
+| Files | What to sync |
+|-------|--------------|
+| CLAUDE.md ↔ ROADMAP.md | Current Phase must match |
+| DESIGN.md ↔ actual code | Package structure must match |
+| ARCHITECTURE.md | Must reflect fork approach (not plugin) |
+| ADRs ↔ code | Implementation must follow decisions |
+
 ### When to Update Documentation
 
 | Event | Action |
 |-------|--------|
-| Complete ROADMAP milestone | Update ROADMAP.md checkboxes |
-| Make design decision | Create ADR in `docs/decisions/`, update index |
-| Find/fix issue | Update `docs/ISSUES.md` |
-| Sync with upstream | Update FORK_MAINTENANCE.md |
-| Weekly review | Verify CLAUDE.md status section is current |
+| Complete ROADMAP milestone | Update ROADMAP.md checkboxes, CLAUDE.md phase |
+| Change phase | Update BOTH CLAUDE.md AND ROADMAP.md |
+| Make design decision | Create ADR in `docs/decisions/` |
+| Add/remove module | Update DESIGN.md package structure |
+| Modify Protocol | Run compliance tests, update if needed |
 
-### Documentation Update Checklist
+### Before Each Phase Change Checklist
 
-When making significant changes:
-1. [ ] Update ROADMAP.md status
-2. [ ] Create/update relevant ADR if design decision
-3. [ ] Update CLAUDE.md "Last Updated" date
-4. [ ] Update CLAUDE.md "Current Phase" if changed
-5. [ ] Check docs/ISSUES.md for related items
+```
+1. [ ] Run compliance tests: pytest tests/test_protocol_compliance.py -v
+2. [ ] Run full test suite: pytest tests/ -v
+3. [ ] Update ROADMAP.md phase status
+4. [ ] Update CLAUDE.md "Current Phase" to match ROADMAP.md
+5. [ ] Update CLAUDE.md "Last Updated" date
+6. [ ] Verify DESIGN.md package structure matches reality
+7. [ ] Commit with descriptive message
+```
 
 ### Slash Commands
 
@@ -112,6 +143,7 @@ When making significant changes:
 |---------|---------|
 | `/status` | Show roadmap progress and test status |
 | `/test` | Run the semantic-search test suite |
+| `/review` | Check for documentation drift and implementation mismatches |
 | `/implement <feature>` | TDD implementation workflow |
 | `/sync-upstream` | Sync with upstream Calibre |
 
@@ -135,7 +167,7 @@ When making significant changes:
 
 ## Testing Notes
 
-- 203+ tests currently passing
+- 216+ tests currently passing (includes 13 compliance tests)
 - 18 tests skipped (require optional dependencies)
 - 1 test failing (pytest-asyncio configuration)
 - Use `python -m pytest` (not bare `pytest`) to ensure imports work
