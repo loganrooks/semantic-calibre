@@ -103,22 +103,49 @@ See [docs/ISSUES.md](docs/ISSUES.md) for design decisions.
 
 ---
 
-## Phase 2: Calibre Plugin
+## Phase 2: Viewer Integration
 
-**Goal:** Create an installable Calibre plugin for cross-library semantic search.
+**Goal:** Add semantic search mode to Calibre's e-book viewer (in-book search).
 
 **Status:** Planned
 
-- [ ] **Plugin Skeleton**
-  - InterfaceActionBase implementation
-  - Plugin metadata and packaging
+Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only `src/calibre/gui2/viewer/search.py`.
 
-- [ ] **Embedding Library Manager UI**
+- [ ] **Viewer Search Patch**
+  - Add "Semantic" to search mode dropdown
+  - Delegate to `calibre_semantic.search_viewer_book()`
+  - Convert results to viewer's SearchResult format
+
+- [ ] **On-Demand Book Indexing**
+  - Prompt to index if book not in selected profile
+  - Index current book with selected profile
+  - Show indexing progress
+
+- [ ] **Result Navigation**
+  - Jump to semantic matches in book
+  - Highlight relevant passages
+  - Show similarity scores in sidebar
+
+- [ ] **Profile Selection**
+  - Profile selector in viewer (or use default)
+  - Remember last used profile
+
+---
+
+## Phase 3: Library Search UI
+
+**Goal:** Add semantic search to the main Calibre library interface (cross-book search).
+
+**Status:** Planned
+
+Modifications to main Calibre GUI for library-wide search:
+
+- [ ] **Embedding Library Manager**
   - View/create/delete profiles
   - See which books are indexed where
-  - Manage books in profiles
+  - Bulk index selected books
 
-- [ ] **Search Dialog UI**
+- [ ] **Search Dialog**
   - Qt-based search interface
   - Profile selector
   - Result display with book covers and similarity scores
@@ -127,35 +154,7 @@ See [docs/ISSUES.md](docs/ISSUES.md) for design decisions.
 - [ ] **Index Actions**
   - Right-click "Add to Semantic Index"
   - Bulk indexing with progress
-  - Optional dialog on book add
-
-- [ ] **Configuration Panel**
-  - Profile management
-  - Default behaviors
-  - Storage location
-
----
-
-## Phase 3: Viewer Integration
-
-**Goal:** Add semantic search mode to Calibre's e-book viewer.
-
-**Status:** Planned
-
-- [ ] **Viewer Search Patch**
-  - Add "Semantic" to search mode dropdown
-  - Profile selector (or use default)
-  - Integrate with viewer's search infrastructure
-
-- [ ] **On-Demand Book Indexing**
-  - Prompt to index if not already indexed
-  - Index current book with selected profile
-  - Cache embeddings for reopened books
-
-- [ ] **Result Navigation**
-  - Jump to semantic matches in book
-  - Highlight relevant passages
-  - Show similarity scores in sidebar
+  - Index on book add (optional)
 
 ---
 
@@ -207,9 +206,10 @@ See [docs/ISSUES.md](docs/ISSUES.md) for full list.
 See [CLAUDE.md](CLAUDE.md) for development conventions and [FORK_MAINTENANCE.md](FORK_MAINTENANCE.md) for working with the Calibre fork.
 
 ### Current Priorities
-1. **Calibre AI embedding integration** (Phase 1.5 blocker)
-2. **Embedding profiles implementation** (enables multi-provider)
-3. **Plugin skeleton** (enables user testing)
+1. ~~**Calibre AI embedding integration**~~ ✅ Complete
+2. ~~**Embedding profiles implementation**~~ ✅ Complete
+3. **On-demand indexing** (Phase 1.5 remaining item)
+4. **Viewer integration** (Phase 2 - enables user testing)
 
 ### Documentation
 - [docs/ISSUES.md](docs/ISSUES.md) - Design decisions and known issues
