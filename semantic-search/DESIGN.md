@@ -28,6 +28,7 @@
 calibre_semantic/
 ├── __init__.py
 ├── search.py              # Main SemanticSearchEngine orchestration
+├── viewer.py              # Calibre viewer integration API (Phase 2)
 ├── core/
 │   ├── __init__.py
 │   ├── types.py           # Core data types, protocols, configuration
