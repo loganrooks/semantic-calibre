@@ -1,7 +1,7 @@
 # Semantic Calibre Roadmap
 
-> **Last Updated:** 2025-01-26
-> **Current Phase:** 1.5 - Embedding Profiles & Calibre AI Integration
+> **Last Updated:** 2025-01-27
+> **Current Phase:** 2 - Viewer Integration
 
 ## Vision
 
@@ -61,17 +61,11 @@ See [docs/ISSUES.md](docs/ISSUES.md) for design decisions.
 
 ---
 
-## Phase 1.5: Embedding Profiles & Calibre AI Integration 🚧
+## Phase 1.5: Embedding Profiles & Calibre AI Integration ✅
 
 **Goal:** Support multiple embedding providers with proper Calibre AI integration.
 
-**Status:** In Progress
-
-### In Progress
-- [ ] **On-Demand Indexing**
-  - Remove auto-index default
-  - `index_book(book_id, profile_id)` method
-  - Index status checking
+**Status:** Complete (OpenAI embedding support deferred)
 
 ### Completed
 - [x] Design decisions documented (DD-001 through DD-005)
@@ -96,18 +90,23 @@ See [docs/ISSUES.md](docs/ISSUES.md) for design decisions.
   - Profile selection for search
   - Profile listing with `get_profiles()`
   - Profile-specific clearing with `clear(profile_id)`
+- [x] **On-Demand Indexing**
+  - ProfileManager integration with SemanticSearchEngine
+  - Index status tracking (INDEXING, COMPLETE, FAILED)
+  - `get_book_index_status()` and `needs_indexing()` methods
+  - Status cleared on remove_book and force_reindex
 
-### Planned
+### Deferred
 - [ ] **OpenAI Embedding Support**
   - Add `embed()` to `src/calibre/ai/openai/backend.py`
 
 ---
 
-## Phase 2: Viewer Integration
+## Phase 2: Viewer Integration 🚧
 
 **Goal:** Add semantic search mode to Calibre's e-book viewer (in-book search).
 
-**Status:** Planned
+**Status:** In Progress
 
 Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only `src/calibre/gui2/viewer/search.py`.
 
@@ -208,7 +207,7 @@ See [CLAUDE.md](CLAUDE.md) for development conventions and [FORK_MAINTENANCE.md]
 ### Current Priorities
 1. ~~**Calibre AI embedding integration**~~ ✅ Complete
 2. ~~**Embedding profiles implementation**~~ ✅ Complete
-3. **On-demand indexing** (Phase 1.5 remaining item)
+3. ~~**On-demand indexing**~~ ✅ Complete
 4. **Viewer integration** (Phase 2 - enables user testing)
 
 ### Documentation
