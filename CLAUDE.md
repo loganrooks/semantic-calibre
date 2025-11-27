@@ -167,7 +167,7 @@ These files must stay synchronized:
 
 ## Testing Notes
 
-- 216+ tests currently passing (includes 13 compliance tests)
+- 234+ tests currently passing (includes compliance + viewer tests)
 - 18 tests skipped (require optional dependencies)
 - 1 test failing (pytest-asyncio configuration)
 - Use `python -m pytest` (not bare `pytest`) to ensure imports work

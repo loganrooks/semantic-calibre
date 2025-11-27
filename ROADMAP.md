@@ -106,25 +106,33 @@ See [docs/ISSUES.md](docs/ISSUES.md) for design decisions.
 
 **Goal:** Add semantic search mode to Calibre's e-book viewer (in-book search).
 
-**Status:** In Progress
+**Status:** In Progress (Core Complete)
 
 Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only `src/calibre/gui2/viewer/search.py`.
 
-- [ ] **Viewer Search Patch**
+### Completed
+- [x] **Viewer Search Patch**
   - Add "Semantic" to search mode dropdown
   - Delegate to `calibre_semantic.search_viewer_book()`
   - Convert results to viewer's SearchResult format
+  - Graceful fallback if library not installed
 
-- [ ] **On-Demand Book Indexing**
+- [x] **Viewer Integration API** (`calibre_semantic/viewer.py`)
+  - `search_viewer_book()` - Main search entry point
+  - `is_book_indexed()` - Check indexing status
+  - `index_book_for_viewer()` - Index book content
+  - Auto-indexing on first search
+
+### In Progress
+- [ ] **On-Demand Book Indexing UI**
   - Prompt to index if book not in selected profile
-  - Index current book with selected profile
-  - Show indexing progress
+  - Show indexing progress indicator
 
-- [ ] **Result Navigation**
-  - Jump to semantic matches in book
+- [ ] **Result Navigation Enhancement**
   - Highlight relevant passages
-  - Show similarity scores in sidebar
+  - Show similarity scores in results
 
+### Planned
 - [ ] **Profile Selection**
   - Profile selector in viewer (or use default)
   - Remember last used profile
