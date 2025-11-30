@@ -387,6 +387,117 @@ def text_chat(messages: Iterable[ChatMessage], use_model: str = '') -> Iterator[
     yield from chat_with_error_handler(text_chat_implementation(messages, use_model))
 
 
+# =============================================================================
+# Embedding API
+# See: https://ai.google.dev/gemini-api/docs/embeddings
+# =============================================================================
+
+DEFAULT_EMBEDDING_MODEL = 'models/text-embedding-004'
+DEFAULT_EMBEDDING_DIMENSION = 768
+
+
+def get_embedding_models() -> dict[str, Model]:
+    """Get models that support embedding."""
+    return {
+        mid: m for mid, m in get_available_models().items()
+        if AICapabilities.embedding in m.capabilities
+    }
+
+
+def embed(
+    texts: list[str],
+    model: str = DEFAULT_EMBEDDING_MODEL,
+    dimensions: int = DEFAULT_EMBEDDING_DIMENSION,
+    task_type: str = 'SEMANTIC_SIMILARITY',
+) -> list[list[float]]:
+    """Generate embeddings for texts using Gemini API.
+
+    Args:
+        texts: List of texts to embed
+        model: Embedding model ID (default: text-embedding-004)
+        dimensions: Output dimensions (256, 768, or 3072)
+        task_type: One of RETRIEVAL_QUERY, RETRIEVAL_DOCUMENT,
+                   SEMANTIC_SIMILARITY, CLASSIFICATION, CLUSTERING
+
+    Returns:
+        List of embedding vectors (list of floats)
+
+    Raises:
+        NoAPIKey: If API key is not configured
+    """
+    from urllib.request import urlopen
+
+    if not texts:
+        return []
+
+    api_key = decoded_api_key()
+
+    # Use batch endpoint for efficiency
+    url = f'{API_BASE_URL}/{model}:batchEmbedContents'
+    data = {
+        'requests': [
+            {
+                'model': model,
+                'content': {'parts': [{'text': text}]},
+                'outputDimensionality': dimensions,
+                'taskType': task_type,
+            }
+            for text in texts
+        ]
+    }
+
+    headers = {
+        'X-goog-api-key': api_key,
+        'Content-Type': 'application/json',
+    }
+
+    req = Request(url, data=json.dumps(data).encode('utf-8'), headers=headers, method='POST')
+    with urlopen(req) as response:
+        result = json.loads(response.read())
+        return [e['values'] for e in result['embeddings']]
+
+
+def embed_query(
+    query: str,
+    model: str = DEFAULT_EMBEDDING_MODEL,
+    dimensions: int = DEFAULT_EMBEDDING_DIMENSION,
+) -> list[float]:
+    """Generate embedding for a search query.
+
+    Uses RETRIEVAL_QUERY task type optimized for queries.
+
+    Args:
+        query: The search query text
+        model: Embedding model ID
+        dimensions: Output dimensions
+
+    Returns:
+        Embedding vector (list of floats)
+    """
+    result = embed([query], model, dimensions, task_type='RETRIEVAL_QUERY')
+    return result[0] if result else []
+
+
+def embed_documents(
+    documents: list[str],
+    model: str = DEFAULT_EMBEDDING_MODEL,
+    dimensions: int = DEFAULT_EMBEDDING_DIMENSION,
+) -> list[list[float]]:
+    """Generate embeddings for documents to be searched.
+
+    Uses RETRIEVAL_DOCUMENT task type optimized for documents.
+
+    Args:
+        documents: List of document texts
+        model: Embedding model ID
+        dimensions: Output dimensions
+
+    Returns:
+        List of embedding vectors
+    """
+    return embed(documents, model, dimensions, task_type='RETRIEVAL_DOCUMENT')
+
+
 def develop(use_model: str = '', msg: str = '') -> None:
     # calibre-debug -c 'from calibre.ai.google.backend import develop; develop()'
     print('\n'.join(f'{k}:{m.id}' for k, m in gemini_models().items()))

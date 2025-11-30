@@ -4,26 +4,41 @@ This module provides the high-level API for semantic search operations,
 coordinating between embedding providers, vector stores, and chunking
 strategies.
 
+Profile Support:
+    All operations accept an optional profile_id parameter for namespace
+    isolation. This allows storing embeddings from different models or
+    configurations in the same database.
+
+On-Demand Indexing:
+    When a ProfileManager is provided, the engine tracks which books are
+    indexed in which profiles. Use get_book_index_status() to check if
+    a book needs indexing before searching.
+
 Usage:
     >>> from calibre_semantic import SemanticSearchEngine
     >>> from calibre_semantic.core import SemanticSearchConfig
+    >>> from calibre_semantic.core.profiles import ProfileManager
     >>> config = SemanticSearchConfig()
-    >>> engine = SemanticSearchEngine(config)
-    >>> engine.index_text(text, book_id, 0, "chapter1.xhtml")
-    >>> results = engine.search("machine learning")
+    >>> profile_manager = ProfileManager(db_path="./semantic.db")
+    >>> engine = SemanticSearchEngine(config, profile_manager=profile_manager)
+    >>> engine.index_epub(epub_path, book_id, profile_id="my-profile")
+    >>> results = engine.search("machine learning", profile_id="my-profile")
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
 from calibre_semantic.core.chunking import create_chunking_strategy
 from calibre_semantic.core.types import (
     BookIdentifier,
+    BookIndexStatus,
     EmbeddedChunk,
     EmbeddingProvider,
+    IndexStatus,
     SearchResult,
     SearchResults,
     SemanticSearchConfig,
@@ -31,7 +46,7 @@ from calibre_semantic.core.types import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from calibre_semantic.core.profiles import ProfileManager
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +58,28 @@ class SemanticSearchEngine:
     - Embedding provider: generates embeddings for text
     - Vector store: stores and searches embeddings
     - Chunking strategy: splits text into searchable chunks
+    - Profile manager (optional): tracks indexing status
+
+    Profile Support:
+        All operations accept an optional profile_id parameter for namespace
+        isolation. Use profiles to:
+        - Store embeddings from different models separately
+        - Create different search indexes for different use cases
+        - Keep embeddings from different libraries isolated
+
+    On-Demand Indexing:
+        When a ProfileManager is provided, the engine tracks which books
+        are indexed in which profiles. This enables:
+        - Checking if a book needs indexing before search
+        - Tracking indexing progress and errors
+        - Knowing which books are in which profiles
 
     Attributes:
         config: The semantic search configuration
         _embedding_provider: The embedding provider instance
         _vector_store: The vector store instance
         _chunking_strategy: The chunking strategy instance
+        _profile_manager: Optional ProfileManager for index tracking
     """
 
     def __init__(
@@ -56,6 +87,7 @@ class SemanticSearchEngine:
         config: SemanticSearchConfig,
         embedding_provider: EmbeddingProvider | None = None,
         vector_store: VectorStore | None = None,
+        profile_manager: "ProfileManager | None" = None,
     ):
         """Initialize the semantic search engine.
 
@@ -63,6 +95,7 @@ class SemanticSearchEngine:
             config: Semantic search configuration
             embedding_provider: Optional pre-configured embedding provider
             vector_store: Optional pre-configured vector store
+            profile_manager: Optional ProfileManager for tracking index status
 
         If embedding_provider or vector_store are not provided, they will
         be created based on the configuration.
@@ -85,6 +118,9 @@ class SemanticSearchEngine:
         # Create chunking strategy
         self._chunking_strategy = create_chunking_strategy(config.chunking)
 
+        # Optional profile manager for index tracking
+        self._profile_manager = profile_manager
+
         # Set model ID in vector store if not already set
         stored_model = self._vector_store.get_model_id()
         if stored_model is None:
@@ -98,7 +134,8 @@ class SemanticSearchEngine:
 
         logger.info(
             f"Initialized SemanticSearchEngine with model={self.model_id}, "
-            f"dimension={self.embedding_dimension}"
+            f"dimension={self.embedding_dimension}, "
+            f"profile_manager={'enabled' if profile_manager else 'disabled'}"
         )
 
     @property
@@ -116,6 +153,16 @@ class SemanticSearchEngine:
         """Get the embedding vector dimension."""
         return self._embedding_provider.dimension
 
+    @property
+    def profile_manager(self) -> "ProfileManager | None":
+        """Get the profile manager, if configured."""
+        return self._profile_manager
+
+    @property
+    def has_profile_manager(self) -> bool:
+        """Check if a profile manager is configured."""
+        return self._profile_manager is not None
+
     # =========================================================================
     # Indexing Operations
     # =========================================================================
@@ -128,6 +175,7 @@ class SemanticSearchEngine:
         spine_name: str,
         chapter_title: str | None = None,
         force_reindex: bool = False,
+        profile_id: str | None = None,
     ) -> int:
         """Index text content from a book.
 
@@ -141,12 +189,13 @@ class SemanticSearchEngine:
             spine_name: Spine item filename
             chapter_title: Optional chapter title
             force_reindex: If True, remove existing chunks first
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             Number of chunks indexed
         """
         if force_reindex:
-            self._vector_store.remove_book(book_id)
+            self._vector_store.remove_book(book_id, profile_id=profile_id)
 
         # Skip empty text
         if not text or not text.strip():
@@ -179,11 +228,11 @@ class SemanticSearchEngine:
         ]
 
         # Store in vector store
-        self._vector_store.add(embedded_chunks)
+        self._vector_store.add(embedded_chunks, profile_id=profile_id)
 
         logger.debug(
             f"Indexed {len(chunks)} chunks for book {book_id}, "
-            f"spine_index={spine_index}"
+            f"spine_index={spine_index}, profile={profile_id}"
         )
 
         return len(chunks)
@@ -194,6 +243,7 @@ class SemanticSearchEngine:
         spine_items: Sequence[tuple[str, str]],
         chapter_titles: dict[int, str] | None = None,
         force_reindex: bool = False,
+        profile_id: str | None = None,
     ) -> int:
         """Index all content from a book.
 
@@ -202,40 +252,66 @@ class SemanticSearchEngine:
             spine_items: List of (spine_name, content) tuples
             chapter_titles: Optional dict mapping spine_index to chapter title
             force_reindex: If True, remove existing chunks first
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             Total number of chunks indexed
         """
         if force_reindex:
-            self._vector_store.remove_book(book_id)
+            self._vector_store.remove_book(book_id, profile_id=profile_id)
+            if self._profile_manager and profile_id:
+                self._profile_manager.remove_book_from_profile(book_id, profile_id)
 
-        total_chunks = 0
-        chapter_titles = chapter_titles or {}
-
-        for spine_index, (spine_name, content) in enumerate(spine_items):
-            chapter_title = chapter_titles.get(spine_index)
-            count = self.index_text(
-                text=content,
-                book_id=book_id,
-                spine_index=spine_index,
-                spine_name=spine_name,
-                chapter_title=chapter_title,
-                force_reindex=False,  # Already handled above
+        # Track indexing status if profile manager is available
+        if self._profile_manager and profile_id:
+            self._profile_manager.set_book_status(
+                book_id, profile_id, IndexStatus.INDEXING
             )
-            total_chunks += count
 
-        logger.info(
-            f"Indexed {total_chunks} chunks from {len(spine_items)} "
-            f"spine items for book {book_id}"
-        )
+        try:
+            total_chunks = 0
+            chapter_titles = chapter_titles or {}
 
-        return total_chunks
+            for spine_index, (spine_name, content) in enumerate(spine_items):
+                chapter_title = chapter_titles.get(spine_index)
+                count = self.index_text(
+                    text=content,
+                    book_id=book_id,
+                    spine_index=spine_index,
+                    spine_name=spine_name,
+                    chapter_title=chapter_title,
+                    force_reindex=False,  # Already handled above
+                    profile_id=profile_id,
+                )
+                total_chunks += count
+
+            # Mark as complete
+            if self._profile_manager and profile_id:
+                self._profile_manager.set_book_status(
+                    book_id, profile_id, IndexStatus.COMPLETE, chunk_count=total_chunks
+                )
+
+            logger.info(
+                f"Indexed {total_chunks} chunks from {len(spine_items)} "
+                f"spine items for book {book_id} (profile={profile_id})"
+            )
+
+            return total_chunks
+
+        except Exception as e:
+            # Mark as failed if profile manager is available
+            if self._profile_manager and profile_id:
+                self._profile_manager.set_book_status(
+                    book_id, profile_id, IndexStatus.FAILED, error_message=str(e)
+                )
+            raise
 
     def index_epub(
         self,
         epub_path: str | bytes,
         book_id: BookIdentifier,
         force_reindex: bool = False,
+        profile_id: str | None = None,
     ) -> int:
         """Index an EPUB file.
 
@@ -245,6 +321,7 @@ class SemanticSearchEngine:
             epub_path: Path to EPUB file or EPUB bytes
             book_id: The book identifier
             force_reindex: If True, remove existing chunks first
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             Total number of chunks indexed
@@ -255,27 +332,54 @@ class SemanticSearchEngine:
         from calibre_semantic.extraction.epub import EPUBExtractor
 
         if force_reindex:
-            self._vector_store.remove_book(book_id)
+            self._vector_store.remove_book(book_id, profile_id=profile_id)
+            if self._profile_manager and profile_id:
+                self._profile_manager.remove_book_from_profile(book_id, profile_id)
 
-        total_chunks = 0
+        # Track indexing status if profile manager is available
+        if self._profile_manager and profile_id:
+            self._profile_manager.set_book_status(
+                book_id, profile_id, IndexStatus.INDEXING
+            )
 
-        with EPUBExtractor(epub_path) as extractor:
-            for item in extractor.iter_content():
-                if not item['text'].strip():
-                    continue
+        try:
+            total_chunks = 0
 
-                count = self.index_text(
-                    text=item['text'],
-                    book_id=book_id,
-                    spine_index=item['spine_index'],
-                    spine_name=item['spine_name'],
-                    chapter_title=item['chapter_title'],
-                    force_reindex=False,  # Already handled above
+            with EPUBExtractor(epub_path) as extractor:
+                for item in extractor.iter_content():
+                    if not item['text'].strip():
+                        continue
+
+                    count = self.index_text(
+                        text=item['text'],
+                        book_id=book_id,
+                        spine_index=item['spine_index'],
+                        spine_name=item['spine_name'],
+                        chapter_title=item['chapter_title'],
+                        force_reindex=False,  # Already handled above
+                        profile_id=profile_id,
+                    )
+                    total_chunks += count
+
+            # Mark as complete
+            if self._profile_manager and profile_id:
+                self._profile_manager.set_book_status(
+                    book_id, profile_id, IndexStatus.COMPLETE, chunk_count=total_chunks
                 )
-                total_chunks += count
 
-        logger.info(f"Indexed {total_chunks} chunks from EPUB for book {book_id}")
-        return total_chunks
+            logger.info(
+                f"Indexed {total_chunks} chunks from EPUB for book {book_id} "
+                f"(profile={profile_id})"
+            )
+            return total_chunks
+
+        except Exception as e:
+            # Mark as failed if profile manager is available
+            if self._profile_manager and profile_id:
+                self._profile_manager.set_book_status(
+                    book_id, profile_id, IndexStatus.FAILED, error_message=str(e)
+                )
+            raise
 
     # =========================================================================
     # Search Operations
@@ -285,6 +389,7 @@ class SemanticSearchEngine:
         self,
         query: str,
         limit: int | None = None,
+        profile_id: str | None = None,
         filter_book_ids: Sequence[BookIdentifier] | None = None,
         filter_libraries: Sequence[str] | None = None,
         min_score: float | None = None,
@@ -294,6 +399,7 @@ class SemanticSearchEngine:
         Args:
             query: The search query text
             limit: Maximum number of results (default from config)
+            profile_id: Profile namespace to search (uses default if None)
             filter_book_ids: Optional filter to specific books
             filter_libraries: Optional filter to specific libraries
             min_score: Minimum similarity score (default from config)
@@ -316,6 +422,7 @@ class SemanticSearchEngine:
         results = self._vector_store.search(
             query_embedding=query_embedding,
             limit=limit,
+            profile_id=profile_id,
             filter_book_ids=filter_book_ids,
             filter_libraries=filter_libraries,
             min_score=min_score,
@@ -332,7 +439,7 @@ class SemanticSearchEngine:
         return SearchResults(
             query=query,
             results=search_results,
-            total_searched=self._vector_store.get_chunk_count(),
+            total_searched=self._vector_store.get_chunk_count(profile_id=profile_id),
             search_time_ms=elapsed_ms,
             model_id=self.model_id,
         )
@@ -341,53 +448,149 @@ class SemanticSearchEngine:
     # Book Management
     # =========================================================================
 
-    def is_indexed(self, book_id: BookIdentifier) -> bool:
-        """Check if a book has been indexed.
+    def is_indexed(
+        self,
+        book_id: BookIdentifier,
+        profile_id: str | None = None,
+    ) -> bool:
+        """Check if a book has been indexed in a profile.
 
         Args:
             book_id: The book identifier to check
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             True if the book has indexed chunks
         """
-        return book_id in self._vector_store.get_indexed_books()
+        return book_id in self._vector_store.get_indexed_books(profile_id=profile_id)
 
-    def remove_book(self, book_id: BookIdentifier) -> int:
-        """Remove all indexed content for a book.
+    def remove_book(
+        self,
+        book_id: BookIdentifier,
+        profile_id: str | None = None,
+    ) -> int:
+        """Remove all indexed content for a book from a profile.
+
+        Also removes the book's index status from ProfileManager if configured.
 
         Args:
             book_id: The book identifier
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             Number of chunks removed
         """
-        count = self._vector_store.remove_book(book_id)
-        logger.info(f"Removed {count} chunks for book {book_id}")
+        count = self._vector_store.remove_book(book_id, profile_id=profile_id)
+
+        # Also remove from profile manager if configured
+        if self._profile_manager and profile_id:
+            self._profile_manager.remove_book_from_profile(book_id, profile_id)
+
+        logger.info(f"Removed {count} chunks for book {book_id} (profile={profile_id})")
         return count
 
-    def get_indexed_books(self) -> set[BookIdentifier]:
-        """Get all indexed book identifiers.
+    def get_book_index_status(
+        self,
+        book_id: BookIdentifier,
+        profile_id: str,
+    ) -> BookIndexStatus | None:
+        """Get the indexing status for a book in a profile.
+
+        Requires a ProfileManager to be configured.
+
+        Args:
+            book_id: The book identifier
+            profile_id: The profile identifier
+
+        Returns:
+            BookIndexStatus or None if not tracked/not found
+
+        Note:
+            Returns None if no ProfileManager is configured.
+        """
+        if self._profile_manager is None:
+            return None
+        return self._profile_manager.get_book_status(book_id, profile_id)
+
+    def needs_indexing(
+        self,
+        book_id: BookIdentifier,
+        profile_id: str,
+    ) -> bool:
+        """Check if a book needs to be indexed in a profile.
+
+        A book needs indexing if:
+        - No ProfileManager is configured (can't determine status)
+        - Book has no status record in the profile
+        - Book status is PENDING, FAILED, or STALE
+
+        Args:
+            book_id: The book identifier
+            profile_id: The profile identifier
+
+        Returns:
+            True if the book should be indexed
+        """
+        if self._profile_manager is None:
+            # Without profile manager, fall back to checking vector store
+            return not self.is_indexed(book_id, profile_id)
+
+        status = self._profile_manager.get_book_status(book_id, profile_id)
+        if status is None:
+            return True
+
+        # Needs indexing if not complete or currently indexing
+        return status.status not in (IndexStatus.COMPLETE, IndexStatus.INDEXING)
+
+    def get_indexed_books(
+        self,
+        profile_id: str | None = None,
+    ) -> set[BookIdentifier]:
+        """Get all indexed book identifiers in a profile.
+
+        Args:
+            profile_id: Profile namespace (uses default if None)
 
         Returns:
             Set of BookIdentifier for all indexed books
         """
-        return self._vector_store.get_indexed_books()
+        return self._vector_store.get_indexed_books(profile_id=profile_id)
 
-    def get_stats(self) -> dict:
+    def get_profiles(self) -> list[str]:
+        """Get all profiles with data in the store.
+
+        Returns:
+            List of profile IDs
+        """
+        return self._vector_store.get_profiles()
+
+    def get_stats(self, profile_id: str | None = None) -> dict:
         """Get statistics about the search index.
+
+        Args:
+            profile_id: Profile namespace (uses default if None for overall stats)
 
         Returns:
             Dictionary with index statistics
         """
-        indexed_books = self._vector_store.get_indexed_books()
+        indexed_books = self._vector_store.get_indexed_books(profile_id=profile_id)
         return {
-            "total_chunks": self._vector_store.get_chunk_count(),
+            "profile_id": profile_id,
+            "total_chunks": self._vector_store.get_chunk_count(profile_id=profile_id),
             "total_books": len(indexed_books),
             "model_id": self.model_id,
             "embedding_dimension": self.embedding_dimension,
         }
 
-    def clear(self) -> None:
-        """Clear all indexed content."""
-        self._vector_store.clear()
-        logger.info("Cleared all indexed content")
+    def clear(self, profile_id: str | None = None) -> None:
+        """Clear indexed content.
+
+        Args:
+            profile_id: If provided, only clear that profile.
+                       If None, clear entire store.
+        """
+        self._vector_store.clear(profile_id=profile_id)
+        if profile_id:
+            logger.info(f"Cleared profile '{profile_id}'")
+        else:
+            logger.info("Cleared all indexed content")

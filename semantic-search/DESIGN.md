@@ -4,10 +4,13 @@
 
 `calibre-semantic` is a Python library providing semantic search capabilities for e-book collections. It serves as the foundation for:
 
-1. **Calibre Plugin** - Cross-library semantic search
-2. **Viewer Integration** - Within-book semantic search
+1. **Viewer Integration** - Within-book semantic search (Phase 2)
+2. **Library Search UI** - Cross-library semantic search (Phase 3)
 3. **MCP Server** - AI assistant integration
 4. **Standalone API** - External integrations
+
+> **Note:** Per [ADR-004](../docs/decisions/004-minimal-viewer-modification.md), we directly modify
+> the Calibre fork (specifically `src/calibre/gui2/viewer/search.py`) rather than creating a plugin.
 
 ## Design Principles
 
@@ -24,39 +27,38 @@
 ```
 calibre_semantic/
 ├── __init__.py
+├── search.py              # Main SemanticSearchEngine orchestration
+├── viewer.py              # Calibre viewer integration API (Phase 2)
 ├── core/
 │   ├── __init__.py
-│   ├── types.py           # Core data types and protocols
-│   ├── embeddings.py      # Embedding provider abstraction
-│   ├── vectordb.py        # Vector storage abstraction
+│   ├── types.py           # Core data types, protocols, configuration
+│   ├── embeddings.py      # Embedding provider abstraction & factory
+│   ├── vectordb.py        # Vector storage abstraction & factory
 │   ├── chunking.py        # Document chunking strategies
-│   └── search.py          # Search orchestration
+│   └── profiles.py        # Embedding profiles & book index status
 ├── providers/
 │   ├── __init__.py
 │   ├── embeddings/
 │   │   ├── __init__.py
-│   │   ├── sentence_transformers.py
-│   │   ├── openai.py
-│   │   ├── ollama.py
-│   │   └── voyageai.py
+│   │   ├── sentence_transformers.py  # Local embedding model
+│   │   └── calibre_ai.py             # Calibre AI module adapter
 │   └── vectordb/
 │       ├── __init__.py
-│       ├── sqlite_vec.py
-│       ├── chromadb.py
-│       └── faiss.py
-├── calibre/
+│       ├── memory.py      # In-memory store (testing/development)
+│       └── sqlite_vec.py  # SQLite-vec persistent store
+├── extraction/
 │   ├── __init__.py
-│   ├── extraction.py      # Text extraction from ebooks
-│   ├── library.py         # Library integration
-│   ├── indexer.py         # Background indexing
-│   └── viewer.py          # Viewer search integration
-├── mcp/
-│   ├── __init__.py
-│   └── server.py          # MCP protocol server
-└── utils/
+│   └── epub.py            # EPUB text extraction
+└── mcp/
     ├── __init__.py
-    ├── config.py          # Configuration management
-    └── logging.py         # Logging utilities
+    ├── __main__.py        # CLI entry point
+    └── server.py          # MCP protocol server
+
+# Planned (not yet implemented):
+# - providers/embeddings/openai.py      # OpenAI embeddings
+# - providers/embeddings/ollama.py      # Ollama local models
+# - providers/vectordb/chromadb.py      # ChromaDB backend
+# - providers/vectordb/faiss.py         # FAISS backend
 ```
 
 ---

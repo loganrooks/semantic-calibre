@@ -90,16 +90,16 @@ def mock_embedding_provider():
 
 @pytest.fixture
 def mock_vector_store():
-    """Create a mock vector store."""
+    """Create a mock vector store with profile support."""
     store = MagicMock()
     store._chunks: dict[str, EmbeddedChunk] = {}
     store._model_id = None
 
-    def add_chunks(chunks):
+    def add_chunks(chunks, profile_id=None):
         for chunk in chunks:
             store._chunks[chunk.chunk.id] = chunk
 
-    def remove_book(book_id):
+    def remove_book(book_id, profile_id=None):
         to_remove = [
             cid for cid, c in store._chunks.items()
             if c.chunk.book_id == book_id
@@ -108,13 +108,17 @@ def mock_vector_store():
             del store._chunks[cid]
         return len(to_remove)
 
-    def get_indexed_books():
+    def get_indexed_books(profile_id=None):
         return {c.chunk.book_id for c in store._chunks.values()}
 
-    def get_chunk_count(book_id=None):
+    def get_chunk_count(book_id=None, profile_id=None):
         if book_id is None:
             return len(store._chunks)
         return sum(1 for c in store._chunks.values() if c.chunk.book_id == book_id)
+
+    def clear(profile_id=None):
+        if profile_id is None:
+            store._chunks.clear()
 
     store.add.side_effect = add_chunks
     store.remove_book.side_effect = remove_book
@@ -122,8 +126,10 @@ def mock_vector_store():
     store.get_chunk_count.side_effect = get_chunk_count
     store.get_model_id.return_value = None
     store.set_model_id.side_effect = lambda m: setattr(store, '_model_id', m)
-    store.search.return_value = []  # Will be customized per test
-    store.clear.return_value = None
+    # Use return_value for search so tests can override it
+    store.search.return_value = []
+    store.clear.side_effect = clear
+    store.get_profiles.return_value = []
 
     return store
 
@@ -595,3 +601,267 @@ class TestBookManagement:
         assert "total_chunks" in stats
         assert "total_books" in stats
         assert "model_id" in stats
+
+
+# =============================================================================
+# On-Demand Indexing Tests
+# =============================================================================
+
+
+class TestOnDemandIndexing:
+    """Tests for on-demand indexing with ProfileManager integration."""
+
+    @pytest.fixture
+    def profile_manager(self):
+        """Create an in-memory ProfileManager for testing."""
+        from calibre_semantic.core.profiles import ProfileManager
+        return ProfileManager()
+
+    @pytest.fixture
+    def test_profile_id(self, profile_manager):
+        """Create a test profile and return its ID."""
+        profile = profile_manager.create_profile(
+            name="Test Profile",
+            provider="mock",
+            model="test-model",
+            dimension=384,
+            profile_id="test-profile",
+        )
+        return profile.id
+
+    def test_engine_with_profile_manager(
+        self,
+        default_config: SemanticSearchConfig,
+        mock_embedding_provider,
+        mock_vector_store,
+        profile_manager,
+    ) -> None:
+        """Engine should accept ProfileManager."""
+        from calibre_semantic.search import SemanticSearchEngine
+
+        engine = SemanticSearchEngine(
+            config=default_config,
+            embedding_provider=mock_embedding_provider,
+            vector_store=mock_vector_store,
+            profile_manager=profile_manager,
+        )
+
+        assert engine.has_profile_manager is True
+        assert engine.profile_manager is profile_manager
+
+    def test_engine_without_profile_manager(
+        self,
+        default_config: SemanticSearchConfig,
+        mock_embedding_provider,
+        mock_vector_store,
+    ) -> None:
+        """Engine should work without ProfileManager."""
+        from calibre_semantic.search import SemanticSearchEngine
+
+        engine = SemanticSearchEngine(
+            config=default_config,
+            embedding_provider=mock_embedding_provider,
+            vector_store=mock_vector_store,
+        )
+
+        assert engine.has_profile_manager is False
+        assert engine.profile_manager is None
+
+    def test_indexing_tracks_status(
+        self,
+        default_config: SemanticSearchConfig,
+        mock_embedding_provider,
+        mock_vector_store,
+        profile_manager,
+        test_profile_id: str,
+        sample_book_id: BookIdentifier,
+        sample_text: str,
+    ) -> None:
+        """Indexing should track status in ProfileManager."""
+        from calibre_semantic.search import SemanticSearchEngine
+        from calibre_semantic.core.types import IndexStatus
+
+        engine = SemanticSearchEngine(
+            config=default_config,
+            embedding_provider=mock_embedding_provider,
+            vector_store=mock_vector_store,
+            profile_manager=profile_manager,
+        )
+
+        # Use index_book_content (not index_text) to track status
+        engine.index_book_content(
+            book_id=sample_book_id,
+            spine_items=[("chapter1.xhtml", sample_text)],
+            profile_id=test_profile_id,
+        )
+
+        # Check status was recorded
+        status = profile_manager.get_book_status(sample_book_id, test_profile_id)
+        assert status is not None
+        assert status.status == IndexStatus.COMPLETE
+        assert status.chunk_count > 0
+
+    def test_get_book_index_status(
+        self,
+        default_config: SemanticSearchConfig,
+        mock_embedding_provider,
+        mock_vector_store,
+        profile_manager,
+        test_profile_id: str,
+        sample_book_id: BookIdentifier,
+        sample_text: str,
+    ) -> None:
+        """get_book_index_status should return status from ProfileManager."""
+        from calibre_semantic.search import SemanticSearchEngine
+        from calibre_semantic.core.types import IndexStatus
+
+        engine = SemanticSearchEngine(
+            config=default_config,
+            embedding_provider=mock_embedding_provider,
+            vector_store=mock_vector_store,
+            profile_manager=profile_manager,
+        )
+
+        # Before indexing - no status
+        status = engine.get_book_index_status(sample_book_id, test_profile_id)
+        assert status is None
+
+        # After indexing - status should exist
+        engine.index_book_content(
+            book_id=sample_book_id,
+            spine_items=[("chapter1.xhtml", sample_text)],
+            profile_id=test_profile_id,
+        )
+
+        status = engine.get_book_index_status(sample_book_id, test_profile_id)
+        assert status is not None
+        assert status.status == IndexStatus.COMPLETE
+
+    def test_needs_indexing_true_for_new_book(
+        self,
+        default_config: SemanticSearchConfig,
+        mock_embedding_provider,
+        mock_vector_store,
+        profile_manager,
+        test_profile_id: str,
+        sample_book_id: BookIdentifier,
+    ) -> None:
+        """needs_indexing should return True for unindexed book."""
+        from calibre_semantic.search import SemanticSearchEngine
+
+        engine = SemanticSearchEngine(
+            config=default_config,
+            embedding_provider=mock_embedding_provider,
+            vector_store=mock_vector_store,
+            profile_manager=profile_manager,
+        )
+
+        assert engine.needs_indexing(sample_book_id, test_profile_id) is True
+
+    def test_needs_indexing_false_after_indexing(
+        self,
+        default_config: SemanticSearchConfig,
+        mock_embedding_provider,
+        mock_vector_store,
+        profile_manager,
+        test_profile_id: str,
+        sample_book_id: BookIdentifier,
+        sample_text: str,
+    ) -> None:
+        """needs_indexing should return False after successful indexing."""
+        from calibre_semantic.search import SemanticSearchEngine
+
+        engine = SemanticSearchEngine(
+            config=default_config,
+            embedding_provider=mock_embedding_provider,
+            vector_store=mock_vector_store,
+            profile_manager=profile_manager,
+        )
+
+        engine.index_book_content(
+            book_id=sample_book_id,
+            spine_items=[("chapter1.xhtml", sample_text)],
+            profile_id=test_profile_id,
+        )
+
+        assert engine.needs_indexing(sample_book_id, test_profile_id) is False
+
+    def test_remove_book_clears_status(
+        self,
+        default_config: SemanticSearchConfig,
+        mock_embedding_provider,
+        mock_vector_store,
+        profile_manager,
+        test_profile_id: str,
+        sample_book_id: BookIdentifier,
+        sample_text: str,
+    ) -> None:
+        """remove_book should also remove status from ProfileManager."""
+        from calibre_semantic.search import SemanticSearchEngine
+
+        engine = SemanticSearchEngine(
+            config=default_config,
+            embedding_provider=mock_embedding_provider,
+            vector_store=mock_vector_store,
+            profile_manager=profile_manager,
+        )
+
+        # Index the book
+        engine.index_book_content(
+            book_id=sample_book_id,
+            spine_items=[("chapter1.xhtml", sample_text)],
+            profile_id=test_profile_id,
+        )
+
+        # Verify status exists
+        assert engine.get_book_index_status(sample_book_id, test_profile_id) is not None
+
+        # Remove the book
+        engine.remove_book(sample_book_id, profile_id=test_profile_id)
+
+        # Status should be cleared
+        assert engine.get_book_index_status(sample_book_id, test_profile_id) is None
+
+    def test_force_reindex_clears_status(
+        self,
+        default_config: SemanticSearchConfig,
+        mock_embedding_provider,
+        mock_vector_store,
+        profile_manager,
+        test_profile_id: str,
+        sample_book_id: BookIdentifier,
+        sample_text: str,
+    ) -> None:
+        """force_reindex should clear and update status."""
+        from calibre_semantic.search import SemanticSearchEngine
+        from calibre_semantic.core.types import IndexStatus
+
+        engine = SemanticSearchEngine(
+            config=default_config,
+            embedding_provider=mock_embedding_provider,
+            vector_store=mock_vector_store,
+            profile_manager=profile_manager,
+        )
+
+        # First indexing
+        engine.index_book_content(
+            book_id=sample_book_id,
+            spine_items=[("chapter1.xhtml", sample_text)],
+            profile_id=test_profile_id,
+        )
+
+        first_status = engine.get_book_index_status(sample_book_id, test_profile_id)
+        assert first_status is not None
+
+        # Force reindex
+        engine.index_book_content(
+            book_id=sample_book_id,
+            spine_items=[("chapter1.xhtml", sample_text + " more text")],
+            profile_id=test_profile_id,
+            force_reindex=True,
+        )
+
+        # Status should be updated
+        second_status = engine.get_book_index_status(sample_book_id, test_profile_id)
+        assert second_status is not None
+        assert second_status.status == IndexStatus.COMPLETE
