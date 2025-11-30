@@ -309,11 +309,9 @@ def search_viewer_book(
         offset = 0
 
         if chunk.location:
-            spine_name = chunk.location.spine_index or ""
-            # Try to parse spine_idx from location
-            if chunk.location.spine_index and chunk.location.spine_index.isdigit():
-                spine_idx = int(chunk.location.spine_index)
-            offset = chunk.location.char_offset or 0
+            spine_idx = chunk.location.spine_index
+            spine_name = chunk.location.spine_name
+            offset = chunk.location.start_offset
 
         viewer_results.append(
             ViewerSearchResult(

@@ -1,6 +1,6 @@
 # Semantic Calibre Roadmap
 
-> **Last Updated:** 2025-01-27
+> **Last Updated:** 2025-11-30
 > **Current Phase:** 2 - Viewer Integration
 
 ## Vision

@@ -370,7 +370,7 @@ class SemanticSearchConfig:
     min_similarity_score: float = 0.3
 
     # Indexing settings
-    index_on_add: bool = True         # Auto-index when books added
+    index_on_add: bool = False        # On-demand indexing (ADR-002)
     background_indexing: bool = True  # Index in background thread
 
     @classmethod
@@ -382,7 +382,7 @@ class SemanticSearchConfig:
             chunking=ChunkingConfig(**data.get("chunking", {})),
             default_result_limit=data.get("default_result_limit", 20),
             min_similarity_score=data.get("min_similarity_score", 0.3),
-            index_on_add=data.get("index_on_add", True),
+            index_on_add=data.get("index_on_add", False),  # ADR-002
             background_indexing=data.get("background_indexing", True),
         )
 
@@ -1734,18 +1734,25 @@ for result in semantic_search.search("meaning of life"):
   },
   "default_result_limit": 20,
   "min_similarity_score": 0.3,
-  "index_on_add": true,
+  "index_on_add": false,
   "background_indexing": true
 }
 ```
 
 ---
 
-## Next Steps
+## Current Status
 
-1. **Implement embedding providers** - Start with sentence-transformers
-2. **Implement SQLite-vec backend** - For tight Calibre integration
-3. **Create Calibre plugin skeleton** - InterfaceActionBase implementation
-4. **Modify viewer search.py** - Add semantic mode
-5. **Build MCP server** - Enable AI assistant integration
-6. **Testing infrastructure** - Unit tests for core components
+Phase 1 (Core Library) and Phase 1.5 (Embedding Profiles) are complete. See [ROADMAP.md](../ROADMAP.md) for current progress.
+
+**Completed:**
+- Embedding providers (sentence-transformers, Calibre AI adapter)
+- SQLite-vec backend with profile support
+- Viewer search.py modification (semantic mode)
+- MCP server
+- Full test suite (234+ tests)
+
+**In Progress (Phase 2):**
+- On-demand book indexing UI
+- Result navigation enhancement
+- Profile selection in viewer
