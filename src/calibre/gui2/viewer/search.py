@@ -57,7 +57,7 @@ def semantic_search_in_book(search_query, spine_names, get_text_func, book_path)
         book_path: Path to the book file
 
     Yields:
-        Tuples of (before, text, after, offset, spine_idx, spine_name)
+        Tuples of (before, text, after, offset, spine_idx, spine_name, score)
     """
     if not SEMANTIC_SEARCH_AVAILABLE:
         return
@@ -93,7 +93,7 @@ def semantic_search_in_book(search_query, spine_names, get_text_func, book_path)
     # Create name to index mapping
     name_to_idx = {name: idx for idx, name in enumerate(spine_names)}
 
-    # Yield results in the expected format
+    # Yield results in the expected format (including score for semantic results)
     for result in results:
         spine_idx = name_to_idx.get(result.spine_name, result.spine_idx)
         yield (
@@ -103,6 +103,7 @@ def semantic_search_in_book(search_query, spine_names, get_text_func, book_path)
             result.offset,
             spine_idx,
             result.spine_name or spine_names[spine_idx] if spine_idx < len(spine_names) else '',
+            result.score,
         )
 
 
@@ -269,6 +270,13 @@ class SearchFinished:
         self.search_query = search_query
 
 
+class IndexingStarted:
+    """Signal that semantic search is indexing the book."""
+
+    def __init__(self, search_query):
+        self.search_query = search_query
+
+
 class SearchResult:
 
     __slots__ = (
@@ -280,13 +288,14 @@ class SearchResult:
         'offset',
         'q',
         'result_num',
+        'score',
         'search_query',
         'spine_idx',
         'text',
         'toc_nodes',
     )
 
-    def __init__(self, search_query, before, text, after, q, name, spine_idx, index, offset, result_num):
+    def __init__(self, search_query, before, text, after, q, name, spine_idx, index, offset, result_num, score=None):
         self.search_query = search_query
         self.q = q
         self.result_num = result_num
@@ -295,6 +304,7 @@ class SearchResult:
         self.file_name = name
         self.is_hidden = False
         self.offset = offset
+        self.score = score  # Similarity score for semantic search (0-1)
         try:
             self.toc_nodes = toc_nodes_for_search_result(self)
         except Exception:
@@ -758,6 +768,10 @@ class Results(QTreeWidget):  # {{{
         if isinstance(result, SearchResult):
             tt = '<p>…' + escape(result.before, False) + '<b>' + escape(
                 result.text, False) + '</b>' + escape(result.after, False) + '…'
+            # Show similarity score for semantic search results
+            if result.score is not None:
+                score_pct = int(result.score * 100)
+                tt = f'<p><b>{_("Relevance")}: {score_pct}%</b></p>' + tt
             item.setData(0, Qt.ItemDataRole.ToolTipRole, tt)
         item.setIcon(0, self.blank_icon)
         self.item_map[len(self.search_results)] = item
@@ -938,18 +952,22 @@ class SearchPanel(QWidget):  # {{{
                     # Get book path for indexing
                     book_path = getattr(set_book_path, 'pathtoebook', None)
                     if book_path:
+                        # Check if book needs indexing and notify user
+                        if not is_book_indexed(book_path):
+                            self.results_found.emit(IndexingStarted(search_query))
+
                         # Define text getter function
                         def get_text(name):
                             return searchable_text_for_name(name)[0]
 
                         # Perform semantic search
                         for result in semantic_search_in_book(search_query, spine, get_text, book_path):
-                            before, text, after, offset, idx, name = result
+                            before, text, after, offset, idx, name, score = result
                             q = (before or '')[-15:] + text + (after or '')[:15]
                             result_num += 1
                             self.results_found.emit(SearchResult(
                                 search_query, before, text, after, q, name, idx,
-                                counter[q], offset, result_num
+                                counter[q], offset, result_num, score=score
                             ))
                             counter[q] += 1
                 except Exception:
@@ -980,8 +998,14 @@ class SearchPanel(QWidget):  # {{{
     def on_result_found(self, result):
         if self.current_search is None or result.search_query != self.current_search:
             return
+        if isinstance(result, IndexingStarted):
+            # Update spinner to show indexing is in progress
+            self.spinner.la.setText(_('Indexing for semantic search...'))
+            return
         if isinstance(result, SearchFinished):
             self.spinner.stop()
+            # Reset spinner text for next search
+            self.spinner.la.setText(_('Searching...'))
             if self.results.number_of_results:
                 self.results.ensure_current_result_visible()
             else:
