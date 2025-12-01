@@ -123,18 +123,25 @@ Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only
   - `index_book_for_viewer()` - Index book content
   - Auto-indexing on first search
 
-### In Progress
-- [ ] **On-Demand Book Indexing UI**
-  - Prompt to index if book not in selected profile
-  - Show indexing progress indicator
+- [x] **Result Enhancement**
+  - Show similarity scores in result tooltips
+  - Visual distinction for semantic results (icon)
+  - User-friendly error messages for search failures
 
-- [ ] **Result Navigation Enhancement**
-  - Highlight relevant passages
-  - Show similarity scores in results
+- [x] **Indexing Progress Feedback**
+  - Show "Indexing for semantic search..." during first search
+  - Spinner indicates background indexing
 
-### Planned
-- [ ] **Profile Selection**
-  - Profile selector in viewer (or use default)
+- [x] **Profile Support**
+  - Profile preference (`viewer-semantic-profile`)
+  - Profile passed through search chain
+
+### Remaining
+- [ ] **Passage Highlighting**
+  - Highlight relevant passages in viewer (requires JS integration)
+
+- [ ] **Profile Selector UI**
+  - Visual profile dropdown (currently preference-only)
   - Remember last used profile
 
 ---
