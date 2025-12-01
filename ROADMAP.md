@@ -1,6 +1,6 @@
 # Semantic Calibre Roadmap
 
-> **Last Updated:** 2025-01-27
+> **Last Updated:** 2025-11-30
 > **Current Phase:** 2 - Viewer Integration
 
 ## Vision
@@ -102,11 +102,11 @@ See [docs/ISSUES.md](docs/ISSUES.md) for design decisions.
 
 ---
 
-## Phase 2: Viewer Integration 🚧
+## Phase 2: Viewer Integration ✅
 
 **Goal:** Add semantic search mode to Calibre's e-book viewer (in-book search).
 
-**Status:** In Progress (Core Complete)
+**Status:** Complete
 
 Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only `src/calibre/gui2/viewer/search.py`.
 
@@ -123,19 +123,32 @@ Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only
   - `index_book_for_viewer()` - Index book content
   - Auto-indexing on first search
 
-### In Progress
-- [ ] **On-Demand Book Indexing UI**
-  - Prompt to index if book not in selected profile
-  - Show indexing progress indicator
+- [x] **Result Enhancement**
+  - Show similarity scores in result tooltips
+  - Visual distinction for semantic results (icon)
+  - User-friendly error messages for search failures
 
-- [ ] **Result Navigation Enhancement**
-  - Highlight relevant passages
-  - Show similarity scores in results
+- [x] **Indexing Progress Feedback**
+  - Show "Indexing for semantic search..." during first search
+  - Spinner indicates background indexing
 
-### Planned
-- [ ] **Profile Selection**
-  - Profile selector in viewer (or use default)
-  - Remember last used profile
+- [x] **Profile Support**
+  - Profile preference (`viewer-semantic-profile`)
+  - Profile passed through search chain
+
+- [x] **Profile Selector UI**
+  - Visual profile dropdown (visible in semantic mode)
+  - Dynamic profile list from SemanticSearchEngine
+  - Remembers last used profile
+
+- [x] **Score Passed to JavaScript**
+  - Score included in `for_js` dict for potential JS-side styling
+
+### Deferred to Future Release
+- [ ] **Passage Highlighting with Score Gradient**
+  - Highlight relevant passages with color intensity based on score
+  - Requires JavaScript modification in viewer bundle (higher upstream sync risk)
+  - Score already passed to JS via `for_js` - infrastructure ready
 
 ---
 
@@ -216,7 +229,8 @@ See [CLAUDE.md](CLAUDE.md) for development conventions and [FORK_MAINTENANCE.md]
 1. ~~**Calibre AI embedding integration**~~ ✅ Complete
 2. ~~**Embedding profiles implementation**~~ ✅ Complete
 3. ~~**On-demand indexing**~~ ✅ Complete
-4. **Viewer integration** (Phase 2 - enables user testing)
+4. ~~**Viewer integration**~~ ✅ Complete (Phase 2)
+5. **Library Search UI** (Phase 3 - cross-book search)
 
 ### Documentation
 - [docs/ISSUES.md](docs/ISSUES.md) - Design decisions and known issues

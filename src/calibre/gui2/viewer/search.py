@@ -47,7 +47,7 @@ except ImportError:
     pass
 
 
-def semantic_search_in_book(search_query, spine_names, get_text_func, book_path):
+def semantic_search_in_book(search_query, spine_names, get_text_func, book_path, profile_id=None):
     """Perform semantic search across the entire book.
 
     Args:
@@ -55,23 +55,41 @@ def semantic_search_in_book(search_query, spine_names, get_text_func, book_path)
         spine_names: List of spine item names
         get_text_func: Function to get text for a spine name
         book_path: Path to the book file
+        profile_id: Optional semantic search profile (default: viewer-default)
 
     Yields:
-        Tuples of (before, text, after, offset, spine_idx, spine_name)
+        Tuples of (before, text, after, offset, spine_idx, spine_name, score)
+        Or a single SearchError if an error occurred
     """
     if not SEMANTIC_SEARCH_AVAILABLE:
+        yield SearchError(
+            search_query,
+            _('Semantic search not available'),
+            _('The semantic search library is not installed. '
+              'Please install calibre-semantic to use this feature.')
+        )
         return
 
     # Build spine_items list for indexing
     spine_items = []
+    extraction_errors = []
     for name in spine_names:
         try:
             text = get_text_func(name)
             spine_items.append((name, text))
-        except Exception:
+        except Exception as e:
+            extraction_errors.append(f"{name}: {e}")
             continue
 
     if not spine_items:
+        details = '\n'.join(extraction_errors) if extraction_errors else None
+        yield SearchError(
+            search_query,
+            _('Cannot extract book text'),
+            _('Could not extract text from any chapter of this book. '
+              'The book may be in an unsupported format.'),
+            details=details
+        )
         return
 
     # Search using calibre_semantic
@@ -80,20 +98,36 @@ def semantic_search_in_book(search_query, spine_names, get_text_func, book_path)
             query=search_query.text,
             book_path=book_path,
             spine_items=spine_items,
+            profile_id=profile_id,
             auto_index=True,
             limit=50,
             min_score=0.3,
             ctx_size=75,
         )
-    except Exception:
+    except ImportError as e:
+        yield SearchError(
+            search_query,
+            _('Missing dependencies'),
+            _('Semantic search requires additional dependencies. '
+              'Please ensure sentence-transformers is installed.'),
+            details=str(e)
+        )
+        return
+    except Exception as e:
         import traceback
-        traceback.print_exc()
+        yield SearchError(
+            search_query,
+            _('Semantic search error'),
+            _('An error occurred during semantic search. '
+              'Please try again or use a different search mode.'),
+            details=traceback.format_exc()
+        )
         return
 
     # Create name to index mapping
     name_to_idx = {name: idx for idx, name in enumerate(spine_names)}
 
-    # Yield results in the expected format
+    # Yield results in the expected format (including score for semantic results)
     for result in results:
         spine_idx = name_to_idx.get(result.spine_name, result.spine_idx)
         yield (
@@ -103,6 +137,7 @@ def semantic_search_in_book(search_query, spine_names, get_text_func, book_path)
             result.offset,
             spine_idx,
             result.spine_name or spine_names[spine_idx] if spine_idx < len(spine_names) else '',
+            result.score,
         )
 
 
@@ -269,6 +304,23 @@ class SearchFinished:
         self.search_query = search_query
 
 
+class IndexingStarted:
+    """Signal that semantic search is indexing the book."""
+
+    def __init__(self, search_query):
+        self.search_query = search_query
+
+
+class SearchError:
+    """Signal that an error occurred during search."""
+
+    def __init__(self, search_query, title, message, details=None):
+        self.search_query = search_query
+        self.title = title
+        self.message = message
+        self.details = details
+
+
 class SearchResult:
 
     __slots__ = (
@@ -280,13 +332,14 @@ class SearchResult:
         'offset',
         'q',
         'result_num',
+        'score',
         'search_query',
         'spine_idx',
         'text',
         'toc_nodes',
     )
 
-    def __init__(self, search_query, before, text, after, q, name, spine_idx, index, offset, result_num):
+    def __init__(self, search_query, before, text, after, q, name, spine_idx, index, offset, result_num, score=None):
         self.search_query = search_query
         self.q = q
         self.result_num = result_num
@@ -295,6 +348,7 @@ class SearchResult:
         self.file_name = name
         self.is_hidden = False
         self.offset = offset
+        self.score = score  # Similarity score for semantic search (0-1)
         try:
             self.toc_nodes = toc_nodes_for_search_result(self)
         except Exception:
@@ -304,11 +358,15 @@ class SearchResult:
 
     @property
     def for_js(self):
-        return {
+        result = {
             'file_name': self.file_name, 'spine_idx': self.spine_idx, 'index': self.index, 'text': self.text,
             'before': self.before, 'after': self.after, 'mode': self.search_query.mode, 'q': self.q,
             'result_num': self.result_num
         }
+        # Include score for semantic search results (enables JS-side styling)
+        if self.score is not None:
+            result['score'] = self.score
+        return result
 
     def is_result(self, result_from_js):
         return result_from_js['spine_idx'] == self.spine_idx and self.index == result_from_js['index'] and result_from_js['q'] == self.q
@@ -588,6 +646,17 @@ class SearchInput(QWidget):  # {{{
         cs.stateChanged.connect(self.save_search_type)
         h.addWidget(cs)
 
+        # Profile selector for semantic search (only visible in semantic mode)
+        self.profile_selector = ps = QComboBox(self)
+        ps.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        ps.addItem(_('Default Profile'), '')
+        ps.setToolTip(_('Select embedding profile for semantic search'))
+        ps.currentIndexChanged.connect(self.save_profile_selection)
+        ps.setVisible(False)  # Hidden until semantic mode selected
+        h.addWidget(ps)
+        # Update profile selector visibility when search type changes
+        qt.currentIndexChanged.connect(self.update_profile_selector_visibility)
+
         self.return_button = rb = QToolButton(self)
         rb.setIcon(QIcon.ic('back.png'))
         rb.setToolTip(_('Go back to where you were before searching'))
@@ -666,6 +735,44 @@ class SearchInput(QWidget):  # {{{
         le = self.search_box.lineEdit()
         le.end(False)
         le.selectAll()
+
+    def update_profile_selector_visibility(self):
+        """Show profile selector only when semantic search mode is selected."""
+        is_semantic = self.query_type.currentData() == 'semantic'
+        self.profile_selector.setVisible(is_semantic)
+        if is_semantic:
+            self.populate_profile_selector()
+
+    def populate_profile_selector(self):
+        """Populate profile selector with available profiles from calibre_semantic."""
+        if not SEMANTIC_SEARCH_AVAILABLE:
+            return
+        # Remember current selection
+        current = self.profile_selector.currentData()
+        self.profile_selector.blockSignals(True)
+        self.profile_selector.clear()
+        self.profile_selector.addItem(_('Default Profile'), '')
+        try:
+            from calibre_semantic.search import SemanticSearchEngine
+            engine = SemanticSearchEngine()
+            profiles = engine.get_profiles()
+            for profile_id in profiles:
+                if profile_id:  # Skip empty profile IDs
+                    self.profile_selector.addItem(profile_id, profile_id)
+        except Exception:
+            pass  # Fail silently if profiles can't be loaded
+        # Restore previous selection or use saved preference
+        saved_profile = vprefs.get('viewer-semantic-profile', '')
+        target = current if current else saved_profile
+        idx = self.profile_selector.findData(target)
+        if idx >= 0:
+            self.profile_selector.setCurrentIndex(idx)
+        self.profile_selector.blockSignals(False)
+
+    def save_profile_selection(self):
+        """Save the selected profile to preferences."""
+        profile = self.profile_selector.currentData()
+        vprefs['viewer-semantic-profile'] = profile if profile else None
 # }}}
 
 
@@ -686,6 +793,7 @@ class Results(QTreeWidget):  # {{{
         self.itemClicked.connect(self.item_activated)
         self.blank_icon = QIcon.ic('blank.png')
         self.not_found_icon = QIcon.ic('dialog_warning.png')
+        self.semantic_icon = QIcon.ic('search.png')  # Icon for semantic search results
         self.currentItemChanged.connect(self.current_item_changed)
         self.section_font = QFont(self.font())
         self.section_font.setItalic(True)
@@ -755,11 +863,18 @@ class Results(QTreeWidget):  # {{{
         item.setData(0, SEARCH_RESULT_ROLE, result)
         item.setData(0, RESULT_NUMBER_ROLE, len(self.search_results))
         item.setData(0, SPINE_IDX_ROLE, spine_idx)
+        is_semantic = False
         if isinstance(result, SearchResult):
             tt = '<p>…' + escape(result.before, False) + '<b>' + escape(
                 result.text, False) + '</b>' + escape(result.after, False) + '…'
+            # Show similarity score for semantic search results
+            if result.score is not None:
+                is_semantic = True
+                score_pct = int(result.score * 100)
+                tt = f'<p><b>{_("Relevance")}: {score_pct}%</b></p>' + tt
             item.setData(0, Qt.ItemDataRole.ToolTipRole, tt)
-        item.setIcon(0, self.blank_icon)
+        # Use semantic icon for semantic search results
+        item.setIcon(0, self.semantic_icon if is_semantic else self.blank_icon)
         self.item_map[len(self.search_results)] = item
         self.search_results.append(result)
         n = self.number_of_results
@@ -931,30 +1046,49 @@ class SearchPanel(QWidget):  # {{{
                 continue
 
             # Handle semantic search mode differently
-            if search_query.mode == 'semantic' and SEMANTIC_SEARCH_AVAILABLE:
+            if search_query.mode == 'semantic':
                 result_num = 0
                 counter = Counter()
-                try:
-                    # Get book path for indexing
-                    book_path = getattr(set_book_path, 'pathtoebook', None)
-                    if book_path:
-                        # Define text getter function
-                        def get_text(name):
-                            return searchable_text_for_name(name)[0]
+                # Get book path for indexing
+                book_path = getattr(set_book_path, 'pathtoebook', None)
+                if not book_path:
+                    self.results_found.emit(SearchError(
+                        search_query,
+                        _('Book not available'),
+                        _('Could not determine the path to the current book.')
+                    ))
+                    self.results_found.emit(SearchFinished(search_query))
+                    continue
 
-                        # Perform semantic search
-                        for result in semantic_search_in_book(search_query, spine, get_text, book_path):
-                            before, text, after, offset, idx, name = result
-                            q = (before or '')[-15:] + text + (after or '')[:15]
-                            result_num += 1
-                            self.results_found.emit(SearchResult(
-                                search_query, before, text, after, q, name, idx,
-                                counter[q], offset, result_num
-                            ))
-                            counter[q] += 1
+                # Get semantic search profile from preferences (advanced users can customize)
+                semantic_profile = vprefs.get('viewer-semantic-profile', None)
+
+                # Check if book needs indexing and notify user
+                try:
+                    if SEMANTIC_SEARCH_AVAILABLE and not is_book_indexed(book_path, profile_id=semantic_profile):
+                        self.results_found.emit(IndexingStarted(search_query))
                 except Exception:
-                    import traceback
-                    traceback.print_exc()
+                    pass  # Indexing check failure is not critical
+
+                # Define text getter function
+                def get_text(name):
+                    return searchable_text_for_name(name)[0]
+
+                # Perform semantic search
+                for result in semantic_search_in_book(search_query, spine, get_text, book_path, profile_id=semantic_profile):
+                    # Check if this is an error
+                    if isinstance(result, SearchError):
+                        self.results_found.emit(result)
+                        break
+                    before, text, after, offset, idx, name, score = result
+                    q = (before or '')[-15:] + text + (after or '')[:15]
+                    result_num += 1
+                    self.results_found.emit(SearchResult(
+                        search_query, before, text, after, q, name, idx,
+                        counter[q], offset, result_num, score=score
+                    ))
+                    counter[q] += 1
+
                 self.results_found.emit(SearchFinished(search_query))
                 continue
 
@@ -980,8 +1114,20 @@ class SearchPanel(QWidget):  # {{{
     def on_result_found(self, result):
         if self.current_search is None or result.search_query != self.current_search:
             return
+        if isinstance(result, SearchError):
+            # Show error to user
+            self.spinner.stop()
+            self.spinner.la.setText(_('Searching...'))
+            error_dialog(self, result.title, result.message, det_msg=result.details, show=True)
+            return
+        if isinstance(result, IndexingStarted):
+            # Update spinner to show indexing is in progress
+            self.spinner.la.setText(_('Indexing for semantic search...'))
+            return
         if isinstance(result, SearchFinished):
             self.spinner.stop()
+            # Reset spinner text for next search
+            self.spinner.la.setText(_('Searching...'))
             if self.results.number_of_results:
                 self.results.ensure_current_result_visible()
             else:
