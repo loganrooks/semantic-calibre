@@ -102,11 +102,11 @@ See [docs/ISSUES.md](docs/ISSUES.md) for design decisions.
 
 ---
 
-## Phase 2: Viewer Integration 🚧
+## Phase 2: Viewer Integration ✅
 
 **Goal:** Add semantic search mode to Calibre's e-book viewer (in-book search).
 
-**Status:** In Progress (Core Complete)
+**Status:** Complete
 
 Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only `src/calibre/gui2/viewer/search.py`.
 
@@ -144,9 +144,11 @@ Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only
 - [x] **Score Passed to JavaScript**
   - Score included in `for_js` dict for potential JS-side styling
 
-### Remaining
-- [ ] **Passage Highlighting**
-  - Highlight relevant passages with gradient based on score (requires JS integration)
+### Deferred to Future Release
+- [ ] **Passage Highlighting with Score Gradient**
+  - Highlight relevant passages with color intensity based on score
+  - Requires JavaScript modification in viewer bundle (higher upstream sync risk)
+  - Score already passed to JS via `for_js` - infrastructure ready
 
 ---
 
@@ -227,7 +229,8 @@ See [CLAUDE.md](CLAUDE.md) for development conventions and [FORK_MAINTENANCE.md]
 1. ~~**Calibre AI embedding integration**~~ ✅ Complete
 2. ~~**Embedding profiles implementation**~~ ✅ Complete
 3. ~~**On-demand indexing**~~ ✅ Complete
-4. **Viewer integration** (Phase 2 - enables user testing)
+4. ~~**Viewer integration**~~ ✅ Complete (Phase 2)
+5. **Library Search UI** (Phase 3 - cross-book search)
 
 ### Documentation
 - [docs/ISSUES.md](docs/ISSUES.md) - Design decisions and known issues

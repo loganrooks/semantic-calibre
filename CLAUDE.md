@@ -1,7 +1,8 @@
 # Semantic Calibre - Project Context
 
-> **Current Phase:** 2 - Viewer Integration
+> **Current Phase:** 3 - Library Search UI
 > **Last Updated:** 2025-12-01
+> **Phase 2 Status:** Complete (PR pending)
 
 ## Quick Links
 
@@ -79,11 +80,20 @@ Use Python Protocols for abstractions. See `core/types.py` for examples.
 
 ## Do NOT
 
-- **Modify Calibre source** except `src/calibre/gui2/viewer/search.py` and `src/calibre/ai/*/backend.py`
+- **Modify Calibre source** except approved files (see Key Files section)
 - **Commit secrets** or API keys
 - **Push to main/feature branches** without explicit permission
 - **Break the embedding provider protocol** - existing implementations depend on it
 - **Auto-index by default** - respect user resources (see ADR-002)
+
+## Phase 3 Notes
+
+Phase 3 adds semantic search to the main Calibre library (cross-book search). Key goals:
+- **Profile Manager UI** - View/create/delete embedding profiles
+- **Search Dialog** - Qt-based interface for library-wide semantic search
+- **Index Actions** - Right-click "Add to Semantic Index", bulk indexing
+
+Follow the same minimal modification approach as Phase 2. Prefer adding new files over modifying existing Calibre code where possible.
 
 ## Maintenance Protocol
 
@@ -155,7 +165,16 @@ These files must stay synchronized:
 | `semantic-search/calibre_semantic/core/chunking.py` | Text chunking strategies |
 | `semantic-search/calibre_semantic/search.py` | Main SemanticSearchEngine |
 | `semantic-search/calibre_semantic/providers/embeddings/calibre_ai.py` | Calibre AI adapter |
-| `src/calibre/ai/google/backend.py` | Google AI backend (add embed() here) |
+| `semantic-search/calibre_semantic/viewer.py` | Viewer integration API |
+| `src/calibre/gui2/viewer/search.py` | Viewer search (Phase 2) |
+| `src/calibre/ai/google/backend.py` | Google AI backend (embed()) |
+
+### Phase 3 Target Files (Library Search UI)
+| File | Purpose |
+|------|---------|
+| `src/calibre/gui2/actions/` | Right-click menu actions |
+| `src/calibre/gui2/dialogs/` | Search dialog location |
+| TBD | Profile manager UI, search results display |
 
 ## Branch Strategy
 
