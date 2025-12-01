@@ -358,11 +358,15 @@ class SearchResult:
 
     @property
     def for_js(self):
-        return {
+        result = {
             'file_name': self.file_name, 'spine_idx': self.spine_idx, 'index': self.index, 'text': self.text,
             'before': self.before, 'after': self.after, 'mode': self.search_query.mode, 'q': self.q,
             'result_num': self.result_num
         }
+        # Include score for semantic search results (enables JS-side styling)
+        if self.score is not None:
+            result['score'] = self.score
+        return result
 
     def is_result(self, result_from_js):
         return result_from_js['spine_idx'] == self.spine_idx and self.index == result_from_js['index'] and result_from_js['q'] == self.q
@@ -642,6 +646,17 @@ class SearchInput(QWidget):  # {{{
         cs.stateChanged.connect(self.save_search_type)
         h.addWidget(cs)
 
+        # Profile selector for semantic search (only visible in semantic mode)
+        self.profile_selector = ps = QComboBox(self)
+        ps.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        ps.addItem(_('Default Profile'), '')
+        ps.setToolTip(_('Select embedding profile for semantic search'))
+        ps.currentIndexChanged.connect(self.save_profile_selection)
+        ps.setVisible(False)  # Hidden until semantic mode selected
+        h.addWidget(ps)
+        # Update profile selector visibility when search type changes
+        qt.currentIndexChanged.connect(self.update_profile_selector_visibility)
+
         self.return_button = rb = QToolButton(self)
         rb.setIcon(QIcon.ic('back.png'))
         rb.setToolTip(_('Go back to where you were before searching'))
@@ -720,6 +735,44 @@ class SearchInput(QWidget):  # {{{
         le = self.search_box.lineEdit()
         le.end(False)
         le.selectAll()
+
+    def update_profile_selector_visibility(self):
+        """Show profile selector only when semantic search mode is selected."""
+        is_semantic = self.query_type.currentData() == 'semantic'
+        self.profile_selector.setVisible(is_semantic)
+        if is_semantic:
+            self.populate_profile_selector()
+
+    def populate_profile_selector(self):
+        """Populate profile selector with available profiles from calibre_semantic."""
+        if not SEMANTIC_SEARCH_AVAILABLE:
+            return
+        # Remember current selection
+        current = self.profile_selector.currentData()
+        self.profile_selector.blockSignals(True)
+        self.profile_selector.clear()
+        self.profile_selector.addItem(_('Default Profile'), '')
+        try:
+            from calibre_semantic.search import SemanticSearchEngine
+            engine = SemanticSearchEngine()
+            profiles = engine.get_profiles()
+            for profile_id in profiles:
+                if profile_id:  # Skip empty profile IDs
+                    self.profile_selector.addItem(profile_id, profile_id)
+        except Exception:
+            pass  # Fail silently if profiles can't be loaded
+        # Restore previous selection or use saved preference
+        saved_profile = vprefs.get('viewer-semantic-profile', '')
+        target = current if current else saved_profile
+        idx = self.profile_selector.findData(target)
+        if idx >= 0:
+            self.profile_selector.setCurrentIndex(idx)
+        self.profile_selector.blockSignals(False)
+
+    def save_profile_selection(self):
+        """Save the selected profile to preferences."""
+        profile = self.profile_selector.currentData()
+        vprefs['viewer-semantic-profile'] = profile if profile else None
 # }}}
 
 

@@ -136,13 +136,17 @@ Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only
   - Profile preference (`viewer-semantic-profile`)
   - Profile passed through search chain
 
+- [x] **Profile Selector UI**
+  - Visual profile dropdown (visible in semantic mode)
+  - Dynamic profile list from SemanticSearchEngine
+  - Remembers last used profile
+
+- [x] **Score Passed to JavaScript**
+  - Score included in `for_js` dict for potential JS-side styling
+
 ### Remaining
 - [ ] **Passage Highlighting**
-  - Highlight relevant passages in viewer (requires JS integration)
-
-- [ ] **Profile Selector UI**
-  - Visual profile dropdown (currently preference-only)
-  - Remember last used profile
+  - Highlight relevant passages with gradient based on score (requires JS integration)
 
 ---
 
