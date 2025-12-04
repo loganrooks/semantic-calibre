@@ -15,11 +15,11 @@ from functools import partial
 from qt.core import (
     QAction, QComboBox, QDialogButtonBox, QFrame, QGroupBox,
     QHBoxLayout, QIcon, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QPushButton, QSize, QSplitter, QStackedWidget, Qt, QVBoxLayout, QWidget,
-    pyqtSignal,
+    QPixmap, QPushButton, QSize, QSplitter, QStackedWidget, Qt, QVBoxLayout,
+    QWidget, pyqtSignal,
 )
 
-from calibre.gui2 import error_dialog, info_dialog, warning_dialog
+from calibre.gui2 import error_dialog, gprefs, info_dialog, warning_dialog
 from calibre.gui2.ui import get_gui
 from calibre.gui2.widgets2 import Dialog, HistoryLineEdit2
 
@@ -108,9 +108,11 @@ class ProfileSelector(QWidget):
 
 
 class MetadataFilterPanel(QWidget):
-    """Panel for building metadata filters."""
+    """Panel for building metadata filters with preset support."""
 
     filter_changed = pyqtSignal()
+
+    PRESETS_PREF_KEY = 'semantic_search_filter_presets'
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -119,6 +121,32 @@ class MetadataFilterPanel(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        # Presets section
+        presets_group = QGroupBox(_('Filter Presets'))
+        presets_layout = QVBoxLayout(presets_group)
+
+        # Preset selector row
+        preset_row = QHBoxLayout()
+        self.preset_combo = QComboBox()
+        self.preset_combo.setMinimumWidth(120)
+        self.preset_combo.currentTextChanged.connect(self._on_preset_selected)
+        preset_row.addWidget(self.preset_combo, 1)
+
+        self.save_preset_btn = QPushButton()
+        self.save_preset_btn.setIcon(QIcon.ic('save.png'))
+        self.save_preset_btn.setToolTip(_('Save current filters as preset'))
+        self.save_preset_btn.clicked.connect(self._save_preset)
+        preset_row.addWidget(self.save_preset_btn)
+
+        self.delete_preset_btn = QPushButton()
+        self.delete_preset_btn.setIcon(QIcon.ic('trash.png'))
+        self.delete_preset_btn.setToolTip(_('Delete selected preset'))
+        self.delete_preset_btn.clicked.connect(self._delete_preset)
+        preset_row.addWidget(self.delete_preset_btn)
+
+        presets_layout.addLayout(preset_row)
+        layout.addWidget(presets_group)
 
         # Authors filter
         authors_group = QGroupBox(_('Authors'))
@@ -154,8 +182,90 @@ class MetadataFilterPanel(QWidget):
 
         layout.addStretch()
 
+        # Load presets
+        self._refresh_presets()
+
+    def _get_presets(self):
+        """Get saved presets from preferences."""
+        return gprefs.get(self.PRESETS_PREF_KEY, {})
+
+    def _save_presets(self, presets):
+        """Save presets to preferences."""
+        gprefs[self.PRESETS_PREF_KEY] = presets
+
+    def _refresh_presets(self):
+        """Refresh the preset combo box."""
+        current = self.preset_combo.currentText()
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.clear()
+        self.preset_combo.addItem('')  # Empty item for "no preset"
+
+        presets = self._get_presets()
+        for name in sorted(presets.keys()):
+            self.preset_combo.addItem(name)
+
+        # Restore selection if possible
+        idx = self.preset_combo.findText(current)
+        if idx >= 0:
+            self.preset_combo.setCurrentIndex(idx)
+        self.preset_combo.blockSignals(False)
+
+    def _on_preset_selected(self, name):
+        """Load the selected preset."""
+        if not name:
+            return
+
+        presets = self._get_presets()
+        if name in presets:
+            preset = presets[name]
+            self.authors_input.setText(preset.get('authors', ''))
+            self.tags_input.setText(preset.get('tags', ''))
+            self.series_input.setText(preset.get('series', ''))
+
+    def _save_preset(self):
+        """Save current filters as a new preset."""
+        from qt.core import QInputDialog
+
+        name, ok = QInputDialog.getText(
+            self, _('Save Preset'),
+            _('Enter a name for this filter preset:')
+        )
+        if not ok or not name.strip():
+            return
+
+        name = name.strip()
+        presets = self._get_presets()
+        presets[name] = {
+            'authors': self.authors_input.text(),
+            'tags': self.tags_input.text(),
+            'series': self.series_input.text(),
+        }
+        self._save_presets(presets)
+        self._refresh_presets()
+        self.preset_combo.setCurrentText(name)
+
+    def _delete_preset(self):
+        """Delete the currently selected preset."""
+        name = self.preset_combo.currentText()
+        if not name:
+            return
+
+        from calibre.gui2 import question_dialog
+        if not question_dialog(
+            self, _('Delete Preset'),
+            _('Are you sure you want to delete the preset "{}"?').format(name)
+        ):
+            return
+
+        presets = self._get_presets()
+        if name in presets:
+            del presets[name]
+            self._save_presets(presets)
+            self._refresh_presets()
+
     def clear_filters(self):
         """Clear all filter inputs."""
+        self.preset_combo.setCurrentIndex(0)  # Clear preset selection
         self.authors_input.clear()
         self.tags_input.clear()
         self.series_input.clear()
@@ -210,6 +320,27 @@ class SearchResultItem(QListWidgetItem):
         super().__init__(text)
         self.setToolTip(result.chunk_text[:500] if result.chunk_text else '')
 
+        # Set book cover as icon
+        self._set_cover_icon(result.book_id)
+
+    def _set_cover_icon(self, book_id):
+        """Set book cover as the item icon."""
+        gui = get_gui()
+        if gui is None:
+            return
+
+        try:
+            db = gui.current_db.new_api
+            cover = db.cover(book_id, as_pixmap=True)
+            if cover:
+                self.setIcon(QIcon(cover))
+            else:
+                # Use default cover if no cover available
+                self.setIcon(QIcon.ic('default_cover.png'))
+        except Exception:
+            # Silently fail - item will just have no icon
+            pass
+
 
 class ResultsPanel(QWidget):
     """Panel displaying search results."""
@@ -228,8 +359,10 @@ class ResultsPanel(QWidget):
         self.status_label = QLabel(_('Enter a query to search'))
         layout.addWidget(self.status_label)
 
-        # Results list
+        # Results list with book cover icons
         self.results_list = QListWidget()
+        self.results_list.setIconSize(QSize(60, 80))  # Standard cover aspect ratio
+        self.results_list.setSpacing(4)
         self.results_list.itemClicked.connect(self._on_item_clicked)
         self.results_list.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self.results_list)

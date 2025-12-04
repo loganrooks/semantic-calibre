@@ -217,11 +217,11 @@ Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only
   - Index from library selection or all books
   - Clear index functionality
 
-- [ ] **Remaining UI Polish**
-  - Right-click context menu "Add to Semantic Index"
-  - Book covers in search results
-  - Saved filter presets
-  - Quick filters for common queries
+- [x] **UI Polish** ✅
+  - Menu action with "Add to Semantic Index" for selected books
+  - Book covers displayed in search results (60x80 thumbnails)
+  - Saved filter presets with save/delete functionality
+  - [ ] Quick filters for common queries (deferred)
 
 ---
 
