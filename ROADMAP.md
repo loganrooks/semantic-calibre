@@ -1,7 +1,7 @@
 # Semantic Calibre Roadmap
 
-> **Last Updated:** 2025-11-30
-> **Current Phase:** 2 - Viewer Integration
+> **Last Updated:** 2025-12-03
+> **Current Phase:** 3 - Library Search UI (In Progress)
 
 ## Vision
 
@@ -9,11 +9,11 @@ Enable semantic (meaning-based) search across Calibre e-book libraries, allowing
 
 **Key Design Principles:**
 - Integrate with Calibre's existing AI system (don't duplicate configuration)
-- On-demand indexing (respect user resources)
-- Embedding profiles (support multiple providers/models)
-- Minimal fork divergence (easy upstream sync)
+- On-demand indexing (respect user resources) - [ADR-002](docs/decisions/002-on-demand-indexing.md)
+- Embedding profiles (support multiple providers/models) - [ADR-001](docs/decisions/001-embedding-profiles.md)
+- Minimal fork divergence (easy upstream sync) - [ADR-004](docs/decisions/004-minimal-viewer-modification.md)
 
-See [docs/ISSUES.md](docs/ISSUES.md) for design decisions.
+See [docs/ISSUES.md](docs/ISSUES.md) for design decisions and [docs/decisions/](docs/decisions/) for ADRs.
 
 ---
 
@@ -152,38 +152,85 @@ Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only
 
 ---
 
-## Phase 3: Library Search UI
+## Phase 3: Library Search UI 🔄
 
-**Goal:** Add semantic search to the main Calibre library interface (cross-book search).
+**Goal:** Add semantic search to the main Calibre library interface (cross-book search) with metadata filtering.
 
-**Status:** Planned
+**Status:** In Progress
 
-Modifications to main Calibre GUI for library-wide search:
+**Key ADRs:**
+- [ADR-005](docs/decisions/005-vector-index-strategies.md): ChromaDB with HNSW for library search
+- [ADR-006](docs/decisions/006-hybrid-metadata-filtering.md): Hybrid query architecture
+- [ADR-007](docs/decisions/007-library-ui-integration.md): Library UI integration strategy
+- [ADR-008](docs/decisions/008-background-indexing.md): Background indexing architecture
 
-- [ ] **Embedding Library Manager**
-  - View/create/delete profiles
-  - See which books are indexed where
-  - Bulk index selected books
+### Vector Store Migration
+- [x] **ChromaDB Integration** ✅
+  - ChromaDB provider implemented (`providers/vectordb/chromadb.py`)
+  - Profile-based collections with HNSW indexing
+  - ADR-006 hybrid query support (filter_book_ids parameter)
+  - Metadata storage/reconstruction for TextChunk
+  - 19 tests passing
+- [ ] **Migration Path**
+  - Keep sqlite-vec for viewer (lightweight, per-book)
+  - ChromaDB for library-wide search
+  - No migration needed - different use cases
 
-- [ ] **Search Dialog**
-  - Qt-based search interface
-  - Profile selector
-  - Result display with book covers and similarity scores
-  - Navigation to results in library view
+### Metadata-Aware Search
+- [x] **Hybrid Query Implementation** ✅ - [ADR-006](docs/decisions/006-hybrid-metadata-filtering.md)
+  - `MetadataFilterBuilder`: Translate UI filters to Calibre search syntax
+  - `LibrarySearchEngine`: Two-step hybrid query orchestration
+  - Support all built-in fields: authors, tags, series, publisher, language, rating, pubdate
+  - Support custom columns: `#tradition`, `#course`, `#reading_status`, etc.
+  - 45 new tests for library integration
 
-- [ ] **Index Actions**
-  - Right-click "Add to Semantic Index"
-  - Bulk indexing with progress
-  - Index on book add (optional)
+- [x] **Library Integration API** ✅ (`calibre_semantic/library.py`)
+  - `MetadataFilterBuilder`: Fluent API for building Calibre queries
+  - `LibrarySearchEngine`: Orchestrates Calibre DB + ChromaDB hybrid search
+  - `IndexingJob`: Background indexing per ADR-008
+  - `IndexingResults`: Batch indexing outcomes tracking
+  - 299 total tests passing
+
+- [x] **Filter UI Components** ✅
+  - MetadataFilterPanel widget (authors, tags, series inputs)
+  - Filter builder integration with LibrarySearchEngine
+  - Clear filters functionality
+
+### Library UI - [ADR-007](docs/decisions/007-library-ui-integration.md)
+- [x] **Embedding Library Manager** ✅ (`gui2/semantic_search/profile_manager.py`)
+  - View profiles with statistics
+  - Index selected books from library view
+  - Index all books in library
+  - Clear index per profile
+
+- [x] **Search Dialog** ✅ (`gui2/semantic_search/dialog.py`)
+  - Qt-based search interface with HistoryLineEdit
+  - Profile selector dropdown
+  - Metadata filter panel (authors, tags, series)
+  - Result list with book title, authors, and similarity score
+  - Result preview with chunk text
+  - Navigation to results in library view (double-click to open)
+
+- [x] **Index Actions** ✅
+  - "Manage Index..." button opens profile manager
+  - Bulk indexing with progress bar
+  - Index from library selection or all books
+  - Clear index functionality
+
+- [ ] **Remaining UI Polish**
+  - Right-click context menu "Add to Semantic Index"
+  - Book covers in search results
+  - Saved filter presets
+  - Quick filters for common queries
 
 ---
 
 ## Phase 4: Advanced Features (Future)
 
-- [ ] **Index Strategies**
-  - HNSW for large collections (via FAISS backend)
-  - IVF for very large collections
+- [ ] **Advanced Index Strategies** - [ADR-005](docs/decisions/005-vector-index-strategies.md)
+  - FAISS backend for IVF (very large collections >1M chunks)
   - Quantization for memory-constrained systems
+  - Note: ChromaDB HNSW handles most use cases well
 
 - [ ] **Semantic Recommendations**
   - "Books similar to this"
@@ -230,10 +277,25 @@ See [CLAUDE.md](CLAUDE.md) for development conventions and [FORK_MAINTENANCE.md]
 2. ~~**Embedding profiles implementation**~~ ✅ Complete
 3. ~~**On-demand indexing**~~ ✅ Complete
 4. ~~**Viewer integration**~~ ✅ Complete (Phase 2)
-5. **Library Search UI** (Phase 3 - cross-book search)
+5. **Library Search UI** (Phase 3 - cross-book search) 🔄 In Progress
+   - ✅ ChromaDB vector store provider
+   - Next: MetadataFilterBuilder and Hybrid Query
+   - Next: Library UI (search dialog, profile manager)
 
 ### Documentation
 - [docs/ISSUES.md](docs/ISSUES.md) - Design decisions and known issues
 - [docs/CALIBRE_AI.md](docs/CALIBRE_AI.md) - Calibre AI integration guide
 - [semantic-search/DESIGN.md](semantic-search/DESIGN.md) - Library design
 - [semantic-search/ARCHITECTURE.md](semantic-search/ARCHITECTURE.md) - Architecture details
+
+### Architecture Decision Records (ADRs)
+| ADR | Title | Phase |
+|-----|-------|-------|
+| [001](docs/decisions/001-embedding-profiles.md) | Embedding Profiles | 1.5 |
+| [002](docs/decisions/002-on-demand-indexing.md) | On-Demand Indexing | 1.5 |
+| [003](docs/decisions/003-calibre-ai-integration.md) | Calibre AI Integration | 1.5 |
+| [004](docs/decisions/004-minimal-viewer-modification.md) | Minimal Viewer Modification | 2 |
+| [005](docs/decisions/005-vector-index-strategies.md) | Vector Index Strategies | 2/3 |
+| [006](docs/decisions/006-hybrid-metadata-filtering.md) | Hybrid Metadata Filtering | 3 |
+| [007](docs/decisions/007-library-ui-integration.md) | Library UI Integration | 3 |
+| [008](docs/decisions/008-background-indexing.md) | Background Indexing | 3 |

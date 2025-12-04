@@ -906,6 +906,12 @@ class ActionFullTextSearch(InterfaceActionBase):
     description = _('Search the full text of all books in the calibre library')
 
 
+class ActionSemanticSearch(InterfaceActionBase):
+    name = 'Semantic Search'
+    actual_plugin = 'calibre.gui2.actions.semantic_search:SemanticSearchAction'
+    description = _('Search books by meaning using AI embeddings')
+
+
 class ActionEditToC(InterfaceActionBase):
     name = 'Edit ToC'
     actual_plugin = 'calibre.gui2.actions.toc_edit:ToCEditAction'
@@ -1190,7 +1196,7 @@ plugins += [ActionAdd, ActionAllActions, ActionColumnTooltip, ActionFetchAnnotat
         ActionPluginUpdater, ActionPickRandom, ActionEditToC, ActionSortBy,
         ActionMarkBooks, ActionEmbed, ActionTemplateTester, ActionTagMapper, ActionAuthorMapper,
         ActionVirtualLibrary, ActionBrowseAnnotations, ActionTemplateFunctions, ActionAutoscrollBooks,
-        ActionFullTextSearch, ActionManageCategories, ActionBooklistContextMenu, ActionSavedSearches,
+        ActionFullTextSearch, ActionSemanticSearch, ActionManageCategories, ActionBooklistContextMenu, ActionSavedSearches,
         ActionLayoutActions, ActionBrowseNotes,]
 
 # }}}

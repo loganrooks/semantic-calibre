@@ -41,6 +41,19 @@ def index_book_for_viewer(*args, **kwargs):
     return _index(*args, **kwargs)
 
 
+# Library integration (lazy import to avoid dependency issues)
+def get_library_engine(*args, **kwargs):
+    """Get or create a library search engine - see library module for details."""
+    from calibre_semantic.library import get_library_engine as _get
+    return _get(*args, **kwargs)
+
+
+def MetadataFilterBuilder(*args, **kwargs):
+    """Create a metadata filter builder - see library module for details."""
+    from calibre_semantic.library import MetadataFilterBuilder as _Builder
+    return _Builder(*args, **kwargs)
+
+
 __all__ = [
     "__version__",
     "BookIdentifier",
@@ -59,4 +72,7 @@ __all__ = [
     "search_viewer_book",
     "is_book_indexed",
     "index_book_for_viewer",
+    # Library integration
+    "get_library_engine",
+    "MetadataFilterBuilder",
 ]
