@@ -1,6 +1,7 @@
 # ADR-005: Vector Index Strategies
 
 **Date:** 2025-01-26
+**Updated:** 2025-12-03 (Phase 3: Added ChromaDB)
 **Status:** Accepted
 **Deciders:** Project maintainers
 
@@ -19,50 +20,87 @@ Different vector search algorithms have different performance characteristics. U
 
 ## Decision
 
-1. **Default to "flat"** for simplicity - most personal libraries are small enough
-2. **Expose strategy in profile configuration** for advanced users
-3. **sqlite-vec uses flat** by default
-4. **FAISS backend** provides HNSW/IVF when needed
+### Phase 2 (Viewer Search): Flat/SQLite-vec
+1. **Default to "flat"** for simplicity - single-book search is small
+2. **sqlite-vec uses flat** - lightweight, embedded
+3. Suitable for in-book search (hundreds to thousands of chunks per book)
+
+### Phase 3 (Library Search): HNSW/ChromaDB
+1. **ChromaDB as primary store** for library-wide search
+2. **HNSW by default** - ChromaDB uses HNSW internally
+3. **Metadata filtering support** - essential for hybrid queries ([ADR-006](006-hybrid-metadata-filtering.md))
+4. **Profile-based collections** - each profile gets separate ChromaDB collection
 
 ```python
 @dataclass
 class EmbeddingProfile:
     # ...
-    index_strategy: str = "flat"  # "flat", "hnsw", "ivf"
+    index_strategy: str = "hnsw"  # "flat", "hnsw"
     index_options: dict = field(default_factory=dict)
-    # HNSW options: hnsw_m, hnsw_ef_construction, hnsw_ef_search
-    # IVF options: ivf_nlist, ivf_nprobe
+    # HNSW options: hnsw_space ("cosine", "l2", "ip")
+    # ChromaDB handles M, ef_construction internally
 ```
+
+### Store Selection by Use Case
+
+| Use Case | Store | Strategy | Reason |
+|----------|-------|----------|--------|
+| Viewer (in-book) | SQLite-vec | Flat | Small scale, single file |
+| Library (cross-book) | ChromaDB | HNSW | Scale, metadata filtering |
+| Development/Testing | InMemory | Flat | No persistence needed |
 
 ## Consequences
 
 ### Positive
 - Simple default experience for most users
-- Power users can optimize for their scale
-- No premature optimization
+- ChromaDB handles HNSW complexity automatically
+- Metadata filtering built into library search
+- Power users can tune HNSW parameters if needed
 
 ### Negative
-- Users with large libraries need to know to switch strategies
-- FAISS adds another optional dependency
-- Strategy change requires re-indexing
+- ChromaDB adds ~50MB dependency
+- Two vector stores to maintain (sqlite-vec + ChromaDB)
+- Strategy change still requires re-indexing
 
 ### Neutral
-- Most Calibre users have <10k books (flat is fine)
-- Documentation should include scaling guidance
+- Most Calibre users have <10k books (HNSW handles easily)
+- ChromaDB is well-maintained, active project
+- SQLite-vec remains for lightweight viewer use case
 
 ## Implementation Notes
 
 Current implementations:
-- `InMemoryVectorStore`: Flat (numpy dot product)
-- `SQLiteVecStore`: Flat (sqlite-vec cosine distance)
+- `InMemoryVectorStore`: Flat (numpy dot product) - testing only
+- `SQLiteVecStore`: Flat (sqlite-vec cosine distance) - viewer search
+- `ChromaDBStore`: HNSW (ChromaDB built-in) - library search
 
-Future:
-- `FAISSStore`: HNSW, IVF, with optional quantization
+Threshold guidance:
+- <1k chunks (single book): SQLite-vec is fine
+- 1k-1M chunks (library): ChromaDB HNSW handles well
+- >1M chunks: Consider ChromaDB with quantization
 
-Threshold guidance (to document for users):
-- <10k chunks: Flat is fine (<100ms search)
-- 10k-100k chunks: Consider HNSW
-- >100k chunks: Strongly recommend HNSW or IVF
+### ChromaDB HNSW Configuration
+
+ChromaDB's default HNSW settings work well for most cases:
+```python
+# Defaults (usually don't need to change)
+# M = 16 (number of neighbors per layer)
+# ef_construction = 100 (build-time accuracy)
+# ef_search = 10 (query-time accuracy)
+```
+
+For very large collections or higher recall needs:
+```python
+collection = client.create_collection(
+    name="semantic_library",
+    metadata={
+        "hnsw:space": "cosine",
+        "hnsw:M": 32,  # More connections = higher recall, more memory
+        "hnsw:construction_ef": 200,  # Higher = better index, slower build
+    }
+)
+```
 
 ## Related Decisions
 - [ADR-001](001-embedding-profiles.md): Strategy is per-profile
+- [ADR-006](006-hybrid-metadata-filtering.md): ChromaDB for hybrid queries

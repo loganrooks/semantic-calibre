@@ -29,6 +29,7 @@ calibre_semantic/
 ├── __init__.py
 ├── search.py              # Main SemanticSearchEngine orchestration
 ├── viewer.py              # Calibre viewer integration API (Phase 2)
+├── library.py             # Calibre library integration API (Phase 3)
 ├── core/
 │   ├── __init__.py
 │   ├── types.py           # Core data types, protocols, configuration
@@ -45,10 +46,15 @@ calibre_semantic/
 │   └── vectordb/
 │       ├── __init__.py
 │       ├── memory.py      # In-memory store (testing/development)
-│       └── sqlite_vec.py  # SQLite-vec persistent store
+│       ├── sqlite_vec.py  # SQLite-vec persistent store (viewer)
+│       └── chromadb.py    # ChromaDB store (library search, Phase 3)
 ├── extraction/
 │   ├── __init__.py
 │   └── epub.py            # EPUB text extraction
+├── library/               # Phase 3: Library integration
+│   ├── __init__.py
+│   ├── metadata.py        # MetadataFilterBuilder for Calibre DB queries
+│   └── hybrid_search.py   # Hybrid query orchestration
 └── mcp/
     ├── __init__.py
     ├── __main__.py        # CLI entry point
@@ -57,8 +63,7 @@ calibre_semantic/
 # Planned (not yet implemented):
 # - providers/embeddings/openai.py      # OpenAI embeddings
 # - providers/embeddings/ollama.py      # Ollama local models
-# - providers/vectordb/chromadb.py      # ChromaDB backend
-# - providers/vectordb/faiss.py         # FAISS backend
+# - providers/vectordb/faiss.py         # FAISS backend (large scale)
 ```
 
 ---
@@ -1741,18 +1746,134 @@ for result in semantic_search.search("meaning of life"):
 
 ---
 
+## Phase 3: Hybrid Query Architecture
+
+Per [ADR-006](../docs/decisions/006-hybrid-metadata-filtering.md), Phase 3 uses a hybrid approach for metadata-aware semantic search.
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────┐     ┌─────────────────────────────────┐
+│        Calibre Database         │     │          ChromaDB               │
+│           (SQLite)              │     │       (Vector Store)            │
+│                                 │     │                                 │
+│  Source of Truth:               │     │  Stores only:                   │
+│  ┌─────────────────────────┐   │     │  ┌─────────────────────────┐   │
+│  │ books, authors, tags    │   │     │  │ book_id (reference)     │   │
+│  │ series, publisher       │◄──┼─────┼──┤ chunk_id, embeddings    │   │
+│  │ custom columns (#*)     │   │join │  │ location_info           │   │
+│  │ identifiers, ratings    │   │     │  │ chunk_text (optional)   │   │
+│  └─────────────────────────┘   │     │  └─────────────────────────┘   │
+└─────────────────────────────────┘     └─────────────────────────────────┘
+```
+
+### Query Flow
+
+```python
+# library/hybrid_search.py
+class HybridSearchEngine:
+    """Combines Calibre metadata filtering with ChromaDB semantic search."""
+
+    def search(
+        self,
+        query: str,
+        metadata_filter: dict | None = None,  # {"authors": ["X"], "#tradition": "Y"}
+        profile_id: str | None = None,
+        top_k: int = 20,
+    ) -> SearchResults:
+        # Step 1: Resolve metadata filter to book IDs via Calibre DB
+        if metadata_filter:
+            calibre_query = self.filter_builder.build(metadata_filter)
+            book_ids = self.calibre_db.search(calibre_query)
+        else:
+            book_ids = None  # Search all indexed books
+
+        # Step 2: Semantic search with book_id constraint
+        results = self.chromadb.query(
+            query_embedding=self.embed(query),
+            where={"book_id": {"$in": book_ids}} if book_ids else None,
+            n_results=top_k,
+        )
+
+        # Step 3: Enrich with full metadata from Calibre DB
+        return self.enrich_results(results)
+```
+
+### Metadata Filter Builder
+
+```python
+# library/metadata.py
+class MetadataFilterBuilder:
+    """Translates filter dict to Calibre search syntax."""
+
+    FIELD_MAP = {
+        "authors": "author",
+        "tags": "tag",
+        "series": "series",
+        "publisher": "publisher",
+        "languages": "language",
+        "rating": "rating",
+        "pubdate": "pubdate",
+        "formats": "format",
+    }
+
+    def build(self, filters: dict) -> str:
+        parts = []
+        for field, value in filters.items():
+            if field.startswith('#'):
+                # Custom column - use as-is
+                parts.append(f'{field}:"{value}"')
+            elif field in self.FIELD_MAP:
+                calibre_field = self.FIELD_MAP[field]
+                if isinstance(value, list):
+                    # OR multiple values
+                    sub = ' or '.join(f'{calibre_field}:"{v}"' for v in value)
+                    parts.append(f'({sub})')
+                else:
+                    parts.append(f'{calibre_field}:"{value}"')
+        return ' and '.join(parts)
+```
+
+### Available Filters
+
+**Built-in Calibre Fields:**
+| Filter Key | Calibre Syntax | Example |
+|------------|----------------|---------|
+| `authors` | `author:X` | `{"authors": ["Heidegger", "Husserl"]}` |
+| `tags` | `tag:X` | `{"tags": ["phenomenology"]}` |
+| `series` | `series:X` | `{"series": "Collected Works"}` |
+| `publisher` | `publisher:X` | `{"publisher": "MIT Press"}` |
+| `languages` | `language:X` | `{"languages": ["eng", "deu"]}` |
+| `rating` | `rating:X` | `{"rating": ">8"}` |
+| `pubdate` | `pubdate:X` | `{"pubdate": ">2020"}` |
+| `formats` | `format:X` | `{"formats": ["EPUB"]}` |
+
+**Custom Columns (User-Defined):**
+| Type | Example |
+|------|---------|
+| Enumeration | `{"#tradition": "continental"}` |
+| Text | `{"#course": "PHIL-401"}` |
+| Bool | `{"#is_primary": "true"}` |
+| Rating | `{"#importance": ">6"}` |
+
+---
+
 ## Current Status
 
-Phase 1 (Core Library) and Phase 1.5 (Embedding Profiles) are complete. See [ROADMAP.md](../ROADMAP.md) for current progress.
+Phases 1, 1.5, and 2 are complete. Phase 3 is in progress. See [ROADMAP.md](../ROADMAP.md) for current progress.
 
 **Completed:**
 - Embedding providers (sentence-transformers, Calibre AI adapter)
-- SQLite-vec backend with profile support
+- SQLite-vec backend with profile support (viewer)
 - Viewer search.py modification (semantic mode)
+- Profile selector UI in viewer
 - MCP server
-- Full test suite (234+ tests)
+- Full test suite (254+ tests)
+- **ChromaDB provider** (`providers/vectordb/chromadb.py`) with 19 tests
 
-**In Progress (Phase 2):**
-- On-demand book indexing UI
-- Result navigation enhancement
-- Profile selection in viewer
+**Phase 3 (In Progress):**
+- ✅ ChromaDB integration for library-wide search
+- ⏳ Hybrid query architecture ([ADR-006](../docs/decisions/006-hybrid-metadata-filtering.md))
+- ⏳ MetadataFilterBuilder (`library/metadata.py`)
+- ⏳ Library UI ([ADR-007](../docs/decisions/007-library-ui-integration.md))
+- ⏳ Background indexing ([ADR-008](../docs/decisions/008-background-indexing.md))

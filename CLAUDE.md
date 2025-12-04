@@ -1,7 +1,7 @@
 # Semantic Calibre - Project Context
 
-> **Current Phase:** 3 - Library Search UI
-> **Last Updated:** 2025-12-01
+> **Current Phase:** 3 - Library Search UI (In Progress)
+> **Last Updated:** 2025-12-03
 > **Phase 2 Status:** Complete (PR pending)
 
 ## Quick Links
@@ -18,11 +18,15 @@
 
 This is a **fork of Calibre** (e-book manager) with semantic search capabilities. Find books and passages by meaning, not just keywords.
 
-**Key Design Decisions:**
+**Key Design Decisions (ADRs):**
 - [ADR-001](docs/decisions/001-embedding-profiles.md): Embedding Profiles (not single model)
 - [ADR-002](docs/decisions/002-on-demand-indexing.md): On-demand indexing (not auto-index)
 - [ADR-003](docs/decisions/003-calibre-ai-integration.md): Integrate with Calibre's AI module
 - [ADR-004](docs/decisions/004-minimal-viewer-modification.md): Minimal Calibre source changes
+- [ADR-005](docs/decisions/005-vector-index-strategies.md): Vector index strategies (SQLite-vec for viewer, ChromaDB/HNSW for library)
+- [ADR-006](docs/decisions/006-hybrid-metadata-filtering.md): Hybrid metadata filtering (Calibre DB + Vector Store)
+- [ADR-007](docs/decisions/007-library-ui-integration.md): Library UI integration (minimal modification)
+- [ADR-008](docs/decisions/008-background-indexing.md): Background indexing architecture
 
 ## Repository Structure
 
@@ -88,12 +92,35 @@ Use Python Protocols for abstractions. See `core/types.py` for examples.
 
 ## Phase 3 Notes
 
-Phase 3 adds semantic search to the main Calibre library (cross-book search). Key goals:
-- **Profile Manager UI** - View/create/delete embedding profiles
-- **Search Dialog** - Qt-based interface for library-wide semantic search
-- **Index Actions** - Right-click "Add to Semantic Index", bulk indexing
+Phase 3 adds semantic search to the main Calibre library (cross-book search) with **metadata-aware filtering**.
 
-Follow the same minimal modification approach as Phase 2. Prefer adding new files over modifying existing Calibre code where possible.
+**Key ADRs:**
+- [ADR-005](docs/decisions/005-vector-index-strategies.md): ChromaDB with HNSW for library search
+- [ADR-006](docs/decisions/006-hybrid-metadata-filtering.md): Hybrid query architecture
+- [ADR-007](docs/decisions/007-library-ui-integration.md): Library UI integration strategy
+- [ADR-008](docs/decisions/008-background-indexing.md): Background indexing architecture
+
+**Hybrid Query Architecture** (per ADR-006):
+1. Filter books by metadata in Calibre DB (authors, tags, custom columns)
+2. Semantic search within matching books via ChromaDB
+
+**Progress:**
+- ✅ **ChromaDB Integration** - Provider implemented (`providers/vectordb/chromadb.py`), 19 tests passing
+- ✅ **Library Integration API** - `calibre_semantic/library.py` with hybrid search orchestration
+- ✅ **MetadataFilterBuilder** - Fluent API for Calibre search syntax
+- ✅ **Library UI** - Search dialog and profile manager (per ADR-007)
+- ✅ **Index Actions** - Bulk indexing with progress, clear index
+
+**Remaining:**
+- Right-click context menu integration
+- Book covers in search results
+- Saved filter presets
+
+**Calibre Metadata Available:**
+- Built-in: `authors`, `tags`, `series`, `publisher`, `languages`, `rating`, `pubdate`, `formats`
+- Custom columns: Any user-defined `#column` (enumeration, text, bool, rating, datetime)
+
+Follow the same minimal modification approach as Phase 2 (per ADR-007). Prefer adding new files over modifying existing Calibre code where possible.
 
 ## Maintenance Protocol
 
@@ -170,11 +197,18 @@ These files must stay synchronized:
 | `src/calibre/ai/google/backend.py` | Google AI backend (embed()) |
 
 ### Phase 3 Target Files (Library Search UI)
-| File | Purpose |
-|------|---------|
-| `src/calibre/gui2/actions/` | Right-click menu actions |
-| `src/calibre/gui2/dialogs/` | Search dialog location |
-| TBD | Profile manager UI, search results display |
+Per [ADR-007](docs/decisions/007-library-ui-integration.md):
+
+| File | Purpose | Status |
+|------|---------|--------|
+| `semantic-search/calibre_semantic/providers/vectordb/chromadb.py` | ChromaDB vector store | ✅ Complete |
+| `semantic-search/calibre_semantic/library.py` | Library integration API | ✅ Complete |
+| `src/calibre/gui2/actions/semantic_search.py` | NEW: Menu action | ✅ Complete |
+| `src/calibre/gui2/semantic_search/__init__.py` | NEW: Package | ✅ Complete |
+| `src/calibre/gui2/semantic_search/dialog.py` | NEW: Search dialog | ✅ Complete |
+| `src/calibre/gui2/semantic_search/profile_manager.py` | NEW: Profile manager | ✅ Complete |
+| `src/calibre/customize/builtins.py` | MODIFY: Register action | ✅ Complete |
+| `src/calibre/gui2/library/views.py` | MODIFY: Context menu | ⏳ Planned |
 
 ## Branch Strategy
 
@@ -186,9 +220,9 @@ These files must stay synchronized:
 
 ## Testing Notes
 
-- 234+ tests currently passing (includes compliance + viewer tests)
+- 254+ tests currently passing (includes compliance + viewer + ChromaDB tests)
+- 19 new tests for ChromaDB provider (ADR-006 compliance)
 - 18 tests skipped (require optional dependencies)
-- 1 test failing (pytest-asyncio configuration)
 - Use `python -m pytest` (not bare `pytest`) to ensure imports work
 - See [KI-001, KI-002](docs/ISSUES.md) for skipped test details
 
@@ -197,8 +231,15 @@ These files must stay synchronized:
 **Core (required):**
 - numpy
 
+**Phase 3 (library search):**
+- chromadb (primary vector store with HNSW indexing and metadata filtering)
+
 **Optional:**
 - sentence-transformers (local embeddings)
-- sqlite-vec (persistent vector storage)
+- sqlite-vec (lightweight vector storage, used in Phase 2 viewer)
 - google-generativeai (Gemini embeddings via Calibre AI)
 - openai (OpenAI embeddings via Calibre AI)
+
+**For Windows Build:**
+Add to Calibre's `pyproject.toml`: `numpy`, `chromadb`
+(openai SDK not needed - Calibre's AI module uses urllib directly)
