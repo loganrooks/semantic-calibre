@@ -227,26 +227,125 @@ Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only
 
 ## Phase 4: Advanced Features (Future)
 
+### 4.1: Deferred Items from Earlier Phases
+- [ ] **OpenAI Embedding Support** (from Phase 1.5)
+  - Add `embed()` to `src/calibre/ai/openai/backend.py`
+  - Support text-embedding-3-small, text-embedding-3-large models
+  - Configurable dimensions (256, 1536, 3072)
+
 - [ ] **Advanced Index Strategies** - [ADR-005](docs/decisions/005-vector-index-strategies.md)
   - FAISS backend for IVF (very large collections >1M chunks)
   - Quantization for memory-constrained systems
   - Note: ChromaDB HNSW handles most use cases well
 
-- [ ] **Semantic Recommendations**
-  - "Books similar to this"
-  - "More like this passage"
+- [ ] **Passage Highlighting with Score Gradient** (from Phase 2)
+  - Highlight relevant passages with color intensity based on score
+  - Requires JavaScript modification in viewer bundle
+  - Score already passed to JS via `for_js` - infrastructure ready
 
-- [ ] **Cross-language Search**
-  - Search in English, find results in other languages
-  - Multi-lingual embedding models
+- [ ] **Phase 3 UI Polish**
+  - Right-click context menu "Add to Semantic Index"
+  - Book covers in search results
+  - Saved filter presets
+  - Quick filters for common queries
 
+### 4.2: Advanced Index Strategies
+Per [ADR-005](docs/decisions/005-vector-index-strategies.md):
+
+- [ ] **FAISS Backend** (for very large collections >1M chunks)
+  - IVF (Inverted File Index) for faster search
+  - Product Quantization for memory efficiency
+  - Note: ChromaDB HNSW handles most use cases well
+
+- [ ] **Incremental Indexing**
+  - Detect changed book content
+  - Only re-embed modified sections
+  - Track content hashes per chunk
+
+- [ ] **Model Migration Tools**
+  - Detect embedding model changes
+  - Batch re-index with new model
+  - Parallel old/new index during transition
+
+### 4.3: Semantic Recommendations
+- [ ] **Similar Books**
+  - "Books similar to this" button in library view
+  - Aggregate embeddings to book-level representation
+  - Configurable similarity threshold
+
+- [ ] **Similar Passages**
+  - "More like this passage" in viewer
+  - Find related passages across library
+  - Cluster visualization
+
+- [ ] **Reading Lists**
+  - Generate reading lists from semantic clusters
+  - Thematic grouping of books
+  - "If you liked X, try Y" recommendations
+
+### 4.4: Cross-Language Search
+- [ ] **Multi-lingual Embedding Models**
+  - Support models like `paraphrase-multilingual-MiniLM-L12-v2`
+  - Search in English, find results in German/French/etc.
+  - Language detection per chunk
+
+- [ ] **Translation-Aware Search**
+  - Identify translated editions
+  - Link semantically equivalent passages across languages
+
+### 4.5: Hybrid Search Enhancements
+- [ ] **Full-Text + Semantic Fusion**
+  - Combine BM25/FTS scores with semantic scores
+  - Configurable weight balance
+  - Re-ranking strategies (RRF, linear combination)
+
+- [ ] **Semantic Tag Suggestions**
+  - Suggest tags based on content similarity
+  - Integrate with Calibre's Tag Browser
+  - Auto-categorization based on existing tagged books
+
+- [ ] **Custom Chunking per Genre**
+  - Poetry: sentence-level chunks
+  - Technical: section-level with code blocks
+  - Fiction: paragraph-level with chapter awareness
+
+### 4.6: Analytics & Tracking
 - [ ] **Cost Tracking**
   - Show embedding costs before indexing
-  - Track cumulative API costs
+  - Track cumulative API costs per provider
+  - Budget alerts and limits
 
-- [ ] **Cloud Sync**
+- [ ] **Search Analytics**
+  - Search history with saved searches
+  - Query refinement suggestions
+  - Popular search patterns
+
+- [ ] **Index Statistics Dashboard**
+  - Books indexed per profile
+  - Embedding dimensions and storage usage
+  - Index health monitoring
+
+### 4.7: Sync & Backup
+- [ ] **Export/Import Embeddings**
+  - Export embeddings for backup
+  - Import to new installation
+  - Profile migration between libraries
+
+- [ ] **Cloud Sync** (Long-term)
   - Sync embeddings across devices
   - Shared library search
+  - Collaborative filtering
+
+### 4.8: Performance Optimizations
+- [ ] **Caching Layer**
+  - Query result caching
+  - Embedding cache for repeated content
+  - LRU eviction for memory management
+
+- [ ] **Async Indexing Improvements**
+  - Background indexing daemon
+  - Priority queue for user-requested books
+  - Pause/resume indexing
 
 ---
 
