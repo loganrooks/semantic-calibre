@@ -1,8 +1,9 @@
 # Semantic Calibre - Project Context
 
-> **Current Phase:** 3 - Library Search UI (In Progress)
-> **Last Updated:** 2025-12-03
-> **Phase 2 Status:** Complete (PR pending)
+> **Current Phase:** 3 - Library Search UI (Complete)
+> **Last Updated:** 2025-12-05
+> **Phase 2 Status:** Complete (merged)
+> **Phase 3 Status:** Complete (context menus, book covers, filter presets)
 
 ## Quick Links
 
