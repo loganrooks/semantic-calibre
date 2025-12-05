@@ -54,6 +54,8 @@ dependencies = [
 	"PyQt6_WebEngine == 6.8.0",
 	"MacFSEvents == 0.8.4; sys_platform == 'darwin'",
 	"xxhash == 3.3.0",
+	"numpy == 1.26.4",
+	"chromadb == 0.4.24",
 ]
 
 [project.urls]

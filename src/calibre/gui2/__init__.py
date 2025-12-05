@@ -360,14 +360,14 @@ def create_defs():
             'Edit Metadata', 'Send To Device', 'Save To Disk',
             'Connect Share', 'Copy To Library', None,
             'Convert Books', 'View', 'Open Folder', 'Show Book Details',
-            'Similar Books', 'Tweak ePub', None, 'Remove Books',
+            'Similar Books', 'Semantic Search', 'Tweak ePub', None, 'Remove Books',
             )
 
     defs['action-layout-context-menu-split'] = (
             'Edit Metadata', 'Send To Device', 'Save To Disk',
             'Connect Share', 'Copy To Library', None,
             'Convert Books', 'View', 'Open Folder', 'Show Book Details',
-            'Similar Books', 'Tweak ePub', None, 'Remove Books',
+            'Similar Books', 'Semantic Search', 'Tweak ePub', None, 'Remove Books',
             )
 
     defs['action-layout-context-menu-device'] = (
@@ -380,7 +380,7 @@ def create_defs():
             'Edit Metadata', 'Send To Device', 'Save To Disk',
             'Connect Share', 'Copy To Library', None,
             'Convert Books', 'View', 'Open Folder', 'Show Book Details',
-            'Similar Books', 'Tweak ePub', None, 'Remove Books', None,
+            'Similar Books', 'Semantic Search', 'Tweak ePub', None, 'Remove Books', None,
             'Autoscroll Books'
             )
 

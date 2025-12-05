@@ -1,7 +1,7 @@
 # Semantic Calibre Roadmap
 
-> **Last Updated:** 2025-12-03
-> **Current Phase:** 3 - Library Search UI (In Progress)
+> **Last Updated:** 2025-12-05
+> **Current Phase:** 3 - Library Search UI (Complete)
 
 ## Vision
 
@@ -152,11 +152,11 @@ Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only
 
 ---
 
-## Phase 3: Library Search UI 🔄
+## Phase 3: Library Search UI ✅
 
 **Goal:** Add semantic search to the main Calibre library interface (cross-book search) with metadata filtering.
 
-**Status:** In Progress
+**Status:** Complete
 
 **Key ADRs:**
 - [ADR-005](docs/decisions/005-vector-index-strategies.md): ChromaDB with HNSW for library search
@@ -221,7 +221,8 @@ Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only
   - Menu action with "Add to Semantic Index" for selected books
   - Book covers displayed in search results (60x80 thumbnails)
   - Saved filter presets with save/delete functionality
-  - [ ] Quick filters for common queries (deferred)
+  - Right-click context menu integration for library search
+  - [ ] Quick filters for common queries (deferred to Phase 4)
 
 ---
 
@@ -243,10 +244,7 @@ Per [ADR-004](docs/decisions/004-minimal-viewer-modification.md), we modify only
   - Requires JavaScript modification in viewer bundle
   - Score already passed to JS via `for_js` - infrastructure ready
 
-- [ ] **Phase 3 UI Polish**
-  - Right-click context menu "Add to Semantic Index"
-  - Book covers in search results
-  - Saved filter presets
+- [ ] **Phase 3 UI Polish** (remaining)
   - Quick filters for common queries
 
 ### 4.2: Advanced Index Strategies
@@ -376,10 +374,14 @@ See [CLAUDE.md](CLAUDE.md) for development conventions and [FORK_MAINTENANCE.md]
 2. ~~**Embedding profiles implementation**~~ ✅ Complete
 3. ~~**On-demand indexing**~~ ✅ Complete
 4. ~~**Viewer integration**~~ ✅ Complete (Phase 2)
-5. **Library Search UI** (Phase 3 - cross-book search) 🔄 In Progress
-   - ✅ ChromaDB vector store provider
-   - Next: MetadataFilterBuilder and Hybrid Query
-   - Next: Library UI (search dialog, profile manager)
+5. ~~**Library Search UI**~~ ✅ Complete (Phase 3)
+   - ChromaDB vector store provider
+   - Hybrid metadata filtering
+   - Search dialog, profile manager, context menus
+6. **Phase 4 Features** (Future)
+   - Quick filters for common queries
+   - Similar books recommendations
+   - OpenAI embedding support
 
 ### Documentation
 - [docs/ISSUES.md](docs/ISSUES.md) - Design decisions and known issues
